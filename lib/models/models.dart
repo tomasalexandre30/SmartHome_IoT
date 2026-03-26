@@ -1,51 +1,42 @@
-// ───────────────────────────────────────────
-// MODELOS DE DADOS
-// ───────────────────────────────────────────
-
 enum Room {
   unknown,
   sala,
   quarto,
-  escritorio;
+  cozinha;
 
   String get displayName {
     switch (this) {
-      case Room.sala:       return 'Sala';
-      case Room.quarto:     return 'Quarto';
-      case Room.escritorio: return 'Escritório';
-      case Room.unknown:    return 'Sem sinal';
+      case Room.sala:    return 'Sala';
+      case Room.quarto:  return 'Quarto';
+      case Room.cozinha: return 'Cozinha';
+      case Room.unknown: return 'Sem sinal';
     }
   }
 
   String get emoji {
     switch (this) {
-      case Room.sala:       return '🛋';
-      case Room.quarto:     return '🛏';
-      case Room.escritorio: return '💻';
-      case Room.unknown:    return '—';
+      case Room.sala:    return '🛋';
+      case Room.quarto:  return '🛏';
+      case Room.cozinha: return '🍳';
+      case Room.unknown: return '—';
     }
   }
 
-  // Major do beacon → Room (ajusta conforme a tua configuração)
-  static Room fromMajor(int major) {
-    switch (major) {
-      case 1: return Room.sala;
-      case 2: return Room.quarto;
-      case 3: return Room.escritorio;
+  // Identificação por MAC address
+  static Room fromMac(String mac) {
+    switch (mac.toUpperCase()) {
+      case '51:00:24:12:01:CA': return Room.sala;
+      case '51:00:24:12:01:E3': return Room.quarto;
+      case '51:00:24:12:01:B2': return Room.cozinha;
       default: return Room.unknown;
     }
   }
 }
 
-// ───────────────────────────────────────────
-// DADOS DOS SENSORES (vindos do ESP32 via MQTT)
-// Por enquanto estáticos — serão substituídos
-// por valores reais quando tiveres o ESP32
-// ───────────────────────────────────────────
 class SensorData {
-  final double temperature; // ºC
-  final double humidity;    // %
-  final int luminosity;     // 0-1023 (raw ADC do LDR)
+  final double temperature;
+  final double humidity;
+  final int luminosity;
   final DateTime timestamp;
 
   const SensorData({
@@ -55,10 +46,8 @@ class SensorData {
     required this.timestamp,
   });
 
-  // Converte luminosity raw para percentagem legível
   double get luminosityPercent => (luminosity / 1023 * 100).clamp(0, 100);
 
-  // Dados estáticos de placeholder (substitui por MQTT mais tarde)
   static SensorData get placeholder => SensorData(
     temperature: 22.4,
     humidity: 58.0,
@@ -66,8 +55,6 @@ class SensorData {
     timestamp: DateTime.now(),
   );
 
-  // Parse do JSON que virá do ESP32 via MQTT
-  // {"temp": 22.4, "hum": 58.0, "lux": 312}
   factory SensorData.fromJson(Map<String, dynamic> json) {
     return SensorData(
       temperature: (json['temp'] as num).toDouble(),
@@ -78,12 +65,9 @@ class SensorData {
   }
 }
 
-// ───────────────────────────────────────────
-// ESTADO DOS ATUADORES
-// ───────────────────────────────────────────
 class ActuatorState {
   final bool ledOn;
-  final double ledBrightness; // 0.0 - 1.0
+  final double ledBrightness;
   final LedColor ledColor;
   final bool buzzerOn;
 
@@ -108,8 +92,6 @@ class ActuatorState {
     );
   }
 
-  // JSON para enviar ao ESP32 via MQTT
-  // topic: home/sala/control
   Map<String, dynamic> toJson() => {
     'led': ledOn,
     'brightness': (ledBrightness * 255).round(),
@@ -131,14 +113,11 @@ enum LedColor {
   }
 }
 
-// ───────────────────────────────────────────
-// THRESHOLDS (guardados em SharedPreferences)
-// ───────────────────────────────────────────
 class Thresholds {
   final double tempMax;
   final double tempMin;
   final double humidityMax;
-  final int luminosityAutoOn; // lux abaixo do qual o LED liga automaticamente
+  final int luminosityAutoOn;
 
   const Thresholds({
     this.tempMax = 28.0,
@@ -162,9 +141,6 @@ class Thresholds {
   }
 }
 
-// ───────────────────────────────────────────
-// PONTO DO HISTÓRICO (para os gráficos)
-// ───────────────────────────────────────────
 class HistoryPoint {
   final DateTime time;
   final double temperature;
@@ -178,8 +154,6 @@ class HistoryPoint {
     required this.luminosityPercent,
   });
 
-  // Dados estáticos de exemplo para o histórico
-  // Serão substituídos por dados reais do MQTT
   static List<HistoryPoint> get sampleData {
     final now = DateTime.now();
     return [
@@ -189,7 +163,7 @@ class HistoryPoint {
       HistoryPoint(time: now.subtract(const Duration(hours: 3)),  temperature: 23.4, humidity: 62, luminosityPercent: 50),
       HistoryPoint(time: now.subtract(const Duration(hours: 2)),  temperature: 24.1, humidity: 61, luminosityPercent: 40),
       HistoryPoint(time: now.subtract(const Duration(hours: 1)),  temperature: 23.6, humidity: 59, luminosityPercent: 35),
-      HistoryPoint(time: now,                                       temperature: 22.4, humidity: 58, luminosityPercent: 30),
+      HistoryPoint(time: now,                                      temperature: 22.4, humidity: 58, luminosityPercent: 30),
     ];
   }
 }

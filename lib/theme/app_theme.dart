@@ -3,116 +3,133 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  static const bg       = Color(0xFF09090B);
-  static const surface  = Color(0xFF111113);
-  static const card     = Color(0xFF1A1A1E);
-  static const border   = Color(0xFF27272B);
+  // Backgrounds
+  static const bg      = Color(0xFFF7F8FA);
+  static const surface = Color(0xFFFFFFFF);
+  static const card    = Color(0xFFFFFFFF);
+  static const border  = Color(0xFFEAECF0);
 
-  static const cyan     = Color(0xFF00C8FF);
-  static const cyanDim  = Color(0x2600C8FF);
-  static const orange   = Color(0xFFFF7043);
-  static const orangeDim= Color(0x26FF7043);
-  static const green    = Color(0xFF23D18B);
-  static const greenDim = Color(0x2623D18B);
-  static const red      = Color(0xFFFF4444);
-  static const redDim   = Color(0x26FF4444);
+  // Accent — índigo vivo
+  static const indigo    = Color(0xFF4F6EF7);
+  static const indigoDim = Color(0x184F6EF7);
+  static const indigoLight = Color(0xFFEEF1FE);
 
-  static const textPrimary   = Color(0xFFF5F5F7);
-  static const textSecondary = Color(0xFF71717A);
-  static const textMuted     = Color(0xFF3F3F46);
+  // Semânticos
+  static const teal    = Color(0xFF0EA5A0);
+  static const tealDim = Color(0x180EA5A0);
+  static const amber   = Color(0xFFF59E0B);
+  static const amberDim= Color(0x18F59E0B);
+  static const rose    = Color(0xFFEF4444);
+  static const roseDim = Color(0x18EF4444);
+  static const green   = Color(0xFF10B981);
+  static const greenDim= Color(0x1810B981);
+
+  // Texto
+  static const textPrimary   = Color(0xFF111827);
+  static const textSecondary = Color(0xFF6B7280);
+  static const textMuted     = Color(0xFFD1D5DB);
 }
 
 class AppTheme {
-  static ThemeData get dark {
+  static ThemeData get light {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       scaffoldBackgroundColor: AppColors.bg,
-      colorScheme: const ColorScheme.dark(
+      colorScheme: const ColorScheme.light(
         surface: AppColors.surface,
-        primary: AppColors.cyan,
-        secondary: AppColors.orange,
-        error: AppColors.red,
+        primary: AppColors.indigo,
+        secondary: AppColors.teal,
+        error: AppColors.rose,
+        onPrimary: Colors.white,
+        onSurface: AppColors.textPrimary,
       ),
-      textTheme: GoogleFonts.dmSansTextTheme(ThemeData.dark().textTheme).copyWith(
-        displayLarge: GoogleFonts.dmSans(color: AppColors.textPrimary),
-        bodyLarge:    GoogleFonts.dmSans(color: AppColors.textPrimary),
-        bodyMedium:   GoogleFonts.dmSans(color: AppColors.textSecondary),
+      textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme).copyWith(
+        displayLarge: GoogleFonts.inter(color: AppColors.textPrimary),
+        bodyLarge:    GoogleFonts.inter(color: AppColors.textPrimary),
+        bodyMedium:   GoogleFonts.inter(color: AppColors.textSecondary),
       ),
       cardTheme: CardThemeData(
         color: AppColors.card,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: AppColors.border, width: 0.5),
+          side: const BorderSide(color: AppColors.border, width: 1),
         ),
         margin: EdgeInsets.zero,
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.bg,
+        backgroundColor: AppColors.surface,
         elevation: 0,
-        systemOverlayStyle: SystemUiOverlayStyle.light,
-        titleTextStyle: GoogleFonts.dmSans(
+        scrolledUnderElevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.dark,
+        titleTextStyle: GoogleFonts.inter(
           color: AppColors.textPrimary,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.4,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.5,
         ),
         iconTheme: const IconThemeData(color: AppColors.textSecondary),
+        surfaceTintColor: Colors.transparent,
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: AppColors.surface,
-        selectedItemColor: AppColors.cyan,
-        unselectedItemColor: AppColors.textMuted,
+        selectedItemColor: AppColors.indigo,
+        unselectedItemColor: AppColors.textSecondary,
         type: BottomNavigationBarType.fixed,
         elevation: 0,
+        selectedLabelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w400),
       ),
       dividerTheme: const DividerThemeData(
         color: AppColors.border,
-        thickness: 0.5,
+        thickness: 1,
         space: 0,
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return AppColors.bg;
-          return AppColors.textMuted;
+        thumbColor: WidgetStateProperty.resolveWith((s) {
+          if (s.contains(WidgetState.selected)) return Colors.white;
+          return Colors.white;
         }),
-        trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return AppColors.cyan;
+        trackColor: WidgetStateProperty.resolveWith((s) {
+          if (s.contains(WidgetState.selected)) return AppColors.indigo;
           return AppColors.border;
         }),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
       sliderTheme: const SliderThemeData(
-        activeTrackColor: AppColors.cyan,
+        activeTrackColor: AppColors.indigo,
         inactiveTrackColor: AppColors.border,
-        thumbColor: AppColors.cyan,
-        overlayColor: AppColors.cyanDim,
-        trackHeight: 3,
+        thumbColor: AppColors.indigo,
+        overlayColor: AppColors.indigoDim,
+        trackHeight: 4,
       ),
     );
   }
 
-  static ThemeData get light => dark;
+  static ThemeData get dark => light;
 }
 
 class AppText {
-  static TextStyle value(Color color) => GoogleFonts.jetBrainsMono(
-    color: color, fontSize: 28, fontWeight: FontWeight.w600, letterSpacing: -0.5,
+  static TextStyle value(Color color) => GoogleFonts.inter(
+    color: color, fontSize: 30, fontWeight: FontWeight.w700, letterSpacing: -0.5,
   );
 
-  static TextStyle valueLarge(Color color) => GoogleFonts.jetBrainsMono(
-    color: color, fontSize: 40, fontWeight: FontWeight.w500, letterSpacing: -1,
+  static TextStyle valueLarge(Color color) => GoogleFonts.inter(
+    color: color, fontSize: 42, fontWeight: FontWeight.w700, letterSpacing: -1,
   );
 
-  static final TextStyle label = GoogleFonts.dmSans(
-    color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w500, letterSpacing: 0.5,
+  static final TextStyle label = GoogleFonts.inter(
+    color: AppColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w600,
+    letterSpacing: 0.4,
   );
 
-  static final TextStyle title = GoogleFonts.dmSans(
-    color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: -0.2,
+  static final TextStyle title = GoogleFonts.inter(
+    color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600,
+    letterSpacing: -0.2,
   );
 
-  static final TextStyle body = GoogleFonts.dmSans(
+  static final TextStyle body = GoogleFonts.inter(
     color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w400,
   );
 }
