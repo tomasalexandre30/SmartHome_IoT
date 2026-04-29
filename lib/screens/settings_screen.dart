@@ -32,7 +32,6 @@ class SettingsScreen extends StatelessWidget {
             ]),
             const SizedBox(height: 8),
 
-            // Beacons list
             _GroupHeader(title: 'Beacons Configurados'),
             ...ble.beacons.map((b) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -43,7 +42,7 @@ class SettingsScreen extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: () => _showAddBeaconDialog(context, ble),
                 icon: const Icon(Icons.add_rounded, color: AppTheme.accent),
-                label: const Text('Configurar UUID de Beacon', style: TextStyle(color: AppTheme.accent)),
+                label: const Text('Adicionar Beacon', style: TextStyle(color: AppTheme.accent)),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: AppTheme.border),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -75,9 +74,14 @@ class SettingsScreen extends StatelessWidget {
                 label: 'Limpar histórico',
                 subtitle: 'Remove todos os logs locais',
                 color: AppTheme.error,
-                onTap: () => _confirmClear(context, ss),
+                onTap: () => _confirmClear(context),
               ),
             ]),
+            const SizedBox(height: 24),
+
+            // ── Debug BLE ─────────────────────────────────────────────────
+            _GroupHeader(title: 'Debug BLE'),
+            _DebugBleCard(ble: ble),
             const SizedBox(height: 24),
 
             // ── About ────────────────────────────────────────────────────
@@ -107,13 +111,10 @@ class SettingsScreen extends StatelessWidget {
   }
 
   void _showAddBeaconDialog(BuildContext context, BeaconService ble) {
-    showDialog(
-      context: context,
-      builder: (_) => _AddBeaconDialog(ble: ble),
-    );
+    showDialog(context: context, builder: (_) => _AddBeaconDialog(ble: ble));
   }
 
-  void _confirmClear(BuildContext context, SmartSpaceProvider ss) {
+  void _confirmClear(BuildContext context) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -123,9 +124,40 @@ class SettingsScreen extends StatelessWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
           TextButton(
-            onPressed: () { Navigator.pop(context); /* TODO: clear logs */ },
+            onPressed: () => Navigator.pop(context),
             child: const Text('Limpar', style: TextStyle(color: AppTheme.error)),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Debug BLE Card ────────────────────────────────────────────────────────────
+
+class _DebugBleCard extends StatelessWidget {
+  final BeaconService ble;
+  const _DebugBleCard({required this.ble});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: SS.glowCard(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Dispositivos BLE detetados', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          const Text('Filtra por [BLE SCAN] no Logcat para ver todos', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+          const SizedBox(height: 12),
+          if (ble.debugLog.isEmpty)
+            const Text('Nenhum dispositivo detetado ainda.\nInicia o scan no Dashboard.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12))
+          else
+            ...ble.debugLog.take(10).map((entry) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(entry, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontFamily: 'monospace')),
+            )),
         ],
       ),
     );
@@ -159,7 +191,6 @@ class _ZonePreferencesCardState extends State<_ZonePreferencesCard> {
       ),
       child: Column(
         children: [
-          // Header
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
             borderRadius: BorderRadius.circular(14),
@@ -180,15 +211,12 @@ class _ZonePreferencesCardState extends State<_ZonePreferencesCard> {
               ),
             ),
           ),
-
-          // Expanded preferences
           if (_expanded) ...[
             const Divider(height: 1),
             Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
                 children: [
-                  // Light intensity
                   Row(
                     children: [
                       const Icon(Icons.lightbulb_rounded, color: AppTheme.warning, size: 16),
@@ -204,8 +232,6 @@ class _ZonePreferencesCardState extends State<_ZonePreferencesCard> {
                     activeColor: AppTheme.warning,
                     inactiveColor: AppTheme.border,
                   ),
-
-                  // Temperature
                   Row(
                     children: [
                       const Icon(Icons.thermostat_rounded, color: AppTheme.error, size: 16),
@@ -222,8 +248,6 @@ class _ZonePreferencesCardState extends State<_ZonePreferencesCard> {
                     activeColor: AppTheme.error,
                     inactiveColor: AppTheme.border,
                   ),
-
-                  // Do not disturb
                   Row(
                     children: [
                       const Icon(Icons.do_not_disturb_on_rounded, color: AppTheme.textMuted, size: 16),
@@ -257,7 +281,7 @@ class _BeaconConfigRow extends StatelessWidget {
     decoration: BoxDecoration(
       color: AppTheme.surfaceCard,
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: beacon.isNearby ? AppTheme.accent.withOpacity(0.4) : AppTheme.border),
+      border: Border.all(color: beacon.isNearby ? AppTheme.accentBorder : AppTheme.border),
     ),
     child: Row(
       children: [
@@ -268,7 +292,8 @@ class _BeaconConfigRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(beacon.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
-              Text(beacon.uuid, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+              Text('UUID: ${beacon.uuid}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+              Text('MAC: ${beacon.mac}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
             ],
           ),
         ),
@@ -290,28 +315,43 @@ class _AddBeaconDialog extends StatefulWidget {
 }
 
 class _AddBeaconDialogState extends State<_AddBeaconDialog> {
-  final _nameCtrl  = TextEditingController();
-  final _uuidCtrl  = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _uuidCtrl = TextEditingController();
+  final _macCtrl  = TextEditingController();
   String _selectedZone = 'zone_a';
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _uuidCtrl.dispose();
+    _macCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: AppTheme.surfaceCard,
-      title: const Text('Configurar Beacon', style: TextStyle(color: AppTheme.textPrimary)),
+      title: const Text('Adicionar Beacon', style: TextStyle(color: AppTheme.textPrimary)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
             controller: _nameCtrl,
             style: const TextStyle(color: AppTheme.textPrimary),
-            decoration: const InputDecoration(labelText: 'Nome do beacon', hintText: 'ex: Beacon Sala'),
+            decoration: const InputDecoration(labelText: 'Nome', hintText: 'ex: Beacon Sala'),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _uuidCtrl,
             style: const TextStyle(color: AppTheme.textPrimary),
-            decoration: const InputDecoration(labelText: 'UUID / MAC', hintText: 'ex: AA:BB:CC:DD:EE:FF'),
+            decoration: const InputDecoration(labelText: 'Nome do dispositivo', hintText: 'ex: R24120458'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _macCtrl,
+            style: const TextStyle(color: AppTheme.textPrimary),
+            decoration: const InputDecoration(labelText: 'MAC Address', hintText: 'ex: 51:00:24:12:01:CA'),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
@@ -332,9 +372,14 @@ class _AddBeaconDialogState extends State<_AddBeaconDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
         ElevatedButton(
           onPressed: () {
-            if (_nameCtrl.text.isNotEmpty && _uuidCtrl.text.isNotEmpty) {
+            if (_nameCtrl.text.isNotEmpty && _uuidCtrl.text.isNotEmpty && _macCtrl.text.isNotEmpty) {
               widget.ble.registerBeacons([
-                Beacon(uuid: _uuidCtrl.text.trim(), name: _nameCtrl.text.trim(), zoneId: _selectedZone),
+                Beacon(
+                  uuid: _uuidCtrl.text.trim(),
+                  mac: _macCtrl.text.trim(),
+                  name: _nameCtrl.text.trim(),
+                  zoneId: _selectedZone,
+                ),
               ]);
               Navigator.pop(context);
             }

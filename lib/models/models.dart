@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-// ── Enums ───────────────────────────────────────────────────────────────────
-
 enum ZoneStatus { free, occupied, unknown }
 
 enum LogEventType {
@@ -15,10 +13,9 @@ enum LogEventType {
   alert,
 }
 
-// ── Beacon ──────────────────────────────────────────────────────────────────
-
 class Beacon {
   final String uuid;
+  final String mac;
   final String name;
   final String zoneId;
   int rssi;
@@ -27,6 +24,7 @@ class Beacon {
 
   Beacon({
     required this.uuid,
+    required this.mac,
     required this.name,
     required this.zoneId,
     this.rssi = -100,
@@ -34,7 +32,8 @@ class Beacon {
     DateTime? lastSeen,
   }) : lastSeen = lastSeen ?? DateTime.now();
 
-  bool get isNearby => rssi > -85 && DateTime.now().difference(lastSeen).inSeconds < 10;
+  bool get isNearby =>
+      rssi > -80 && DateTime.now().difference(lastSeen).inSeconds < 10;
 
   String get signalBar {
     if (rssi > -60) return '▂▄▆█';
@@ -52,6 +51,7 @@ class Beacon {
 
   Beacon copyWith({int? rssi, double? distance, DateTime? lastSeen}) => Beacon(
     uuid: uuid,
+    mac: mac,
     name: name,
     zoneId: zoneId,
     rssi: rssi ?? this.rssi,
@@ -60,13 +60,11 @@ class Beacon {
   );
 }
 
-// ── UserPreferences ─────────────────────────────────────────────────────────
-
 class UserPreferences {
   final String zoneId;
-  double lightIntensity; // 0.0 – 1.0
+  double lightIntensity;
   Color lightColor;
-  double temperatureTarget; // °C
+  double temperatureTarget;
   bool doNotDisturb;
 
   UserPreferences({
@@ -107,16 +105,14 @@ class UserPreferences {
   );
 }
 
-// ── AutomationRule ───────────────────────────────────────────────────────────
-
 class AutomationRule {
   final String id;
   final String zoneId;
   final String label;
-  final String sensorKey; // 'luminosity', 'temperature', 'humidity', 'motion'
-  final String operator; // '<', '>', '=='
+  final String sensorKey;
+  final String operator;
   final double threshold;
-  final String action; // 'light_on', 'light_off', 'buzzer', 'notify'
+  final String action;
   bool enabled;
 
   AutomationRule({
@@ -131,8 +127,6 @@ class AutomationRule {
   });
 }
 
-// ── Zone ────────────────────────────────────────────────────────────────────
-
 class Zone {
   final String id;
   final String name;
@@ -140,28 +134,21 @@ class Zone {
   final Color color;
   final IconData icon;
 
-  // Live state
   ZoneStatus status;
   int occupantCount;
   List<String> presentUsers;
 
-  // Sensor readings (populated when ESP32 connected)
-  double? luminosity;    // lux
-  double? temperature;   // °C
-  double? humidity;      // %
+  double? luminosity;
+  double? temperature;
+  double? humidity;
   bool? motionDetected;
 
-  // Actuator state (populated when ESP32 connected)
   bool lightOn;
   double lightIntensity;
   bool buzzerOn;
 
-  // Automation
   List<AutomationRule> rules;
-
-  // Energy
   double energyUsageWh;
-
   DateTime lastUpdated;
 
   Zone({
@@ -239,8 +226,6 @@ class Zone {
   );
 }
 
-// ── LogEvent ─────────────────────────────────────────────────────────────────
-
 class LogEvent {
   final String id;
   final LogEventType type;
@@ -273,7 +258,7 @@ class LogEvent {
       case LogEventType.zoneEntry:          return AppTheme.success;
       case LogEventType.zoneExit:           return AppTheme.textSecondary;
       case LogEventType.manualCommand:      return AppTheme.accent;
-      case LogEventType.automationTrigger:  return const Color(0xFF8B5CF6);
+      case LogEventType.automationTrigger:  return const Color(0xFF7C3AED);
       case LogEventType.connectionLost:     return AppTheme.error;
       case LogEventType.connectionRestored: return AppTheme.success;
       case LogEventType.alert:              return AppTheme.warning;
@@ -281,36 +266,49 @@ class LogEvent {
   }
 }
 
-// ── AppState (default zones & beacons) ───────────────────────────────────────
-
 class DefaultData {
   static List<Zone> zones() => [
     Zone(
       id: 'zone_a',
       name: 'Sala',
-      beaconUuid: 'BEACON-UUID-A',
+      beaconUuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
       color: AppTheme.zoneColors[0],
       icon: Icons.weekend_rounded,
     ),
     Zone(
       id: 'zone_b',
       name: 'Quarto',
-      beaconUuid: 'BEACON-UUID-B',
+      beaconUuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
       color: AppTheme.zoneColors[1],
       icon: Icons.bed_rounded,
     ),
     Zone(
       id: 'zone_c',
       name: 'Escritório',
-      beaconUuid: 'BEACON-UUID-C',
+      beaconUuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
       color: AppTheme.zoneColors[2],
       icon: Icons.computer_rounded,
     ),
   ];
 
   static List<Beacon> beacons() => [
-    Beacon(uuid: 'BEACON-UUID-A', name: 'Beacon Sala',      zoneId: 'zone_a'),
-    Beacon(uuid: 'BEACON-UUID-B', name: 'Beacon Quarto',    zoneId: 'zone_b'),
-    Beacon(uuid: 'BEACON-UUID-C', name: 'Beacon Escritório',zoneId: 'zone_c'),
+    Beacon(
+      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
+      mac: '51:00:24:12:01:CA',
+      name: 'R24120458',
+      zoneId: 'zone_a',
+    ),
+    Beacon(
+      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
+      mac: '51:00:24:12:01:E3',
+      name: 'R24120483',
+      zoneId: 'zone_b',
+    ),
+    Beacon(
+      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
+      mac: '51:00:24:12:01:B2',
+      name: 'R241204XX',
+      zoneId: 'zone_c',
+    ),
   ];
 }

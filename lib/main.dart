@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'theme/app_theme.dart';
 import 'models/models.dart';
 import 'services/beacon_service.dart';
@@ -10,13 +11,23 @@ import 'screens/control_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/settings_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
+    statusBarIconBrightness: Brightness.dark,
   ));
+  await _requestPermissions();
   runApp(const SmartSpaceApp());
+}
+
+Future<void> _requestPermissions() async {
+  await [
+    Permission.bluetooth,
+    Permission.bluetoothScan,
+    Permission.bluetoothConnect,
+    Permission.locationWhenInUse,
+  ].request();
 }
 
 class SmartSpaceApp extends StatelessWidget {
@@ -26,13 +37,9 @@ class SmartSpaceApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) {
-          final ss = SmartSpaceProvider();
-          return ss;
-        }),
+        ChangeNotifierProvider(create: (_) => SmartSpaceProvider()),
         ChangeNotifierProvider(create: (_) {
           final ble = BeaconService();
-          // Register the 3 default beacons
           ble.registerBeacons(DefaultData.beacons());
           return ble;
         }),
@@ -47,8 +54,6 @@ class SmartSpaceApp extends StatelessWidget {
   }
 }
 
-// ── Root with bottom nav ───────────────────────────────────────────────────────
-
 class _Root extends StatefulWidget {
   const _Root();
 
@@ -59,7 +64,6 @@ class _Root extends StatefulWidget {
 class _RootState extends State<_Root> {
   int _index = 0;
 
-  // Listen to BLE zone changes and update SmartSpaceProvider
   @override
   void initState() {
     super.initState();
@@ -67,6 +71,8 @@ class _RootState extends State<_Root> {
       final ble = context.read<BeaconService>();
       final ss  = context.read<SmartSpaceProvider>();
       ble.addListener(() => ss.updateZoneFromBeacon(ble.currentZoneId));
+      // Auto-start scanning
+      ble.startScanning();
     });
   }
 
@@ -78,10 +84,10 @@ class _RootState extends State<_Root> {
   ];
 
   static const _navItems = [
-    BottomNavigationBarItem(icon: Icon(Icons.home_rounded),        label: 'Início'),
-    BottomNavigationBarItem(icon: Icon(Icons.tune_rounded),        label: 'Controlo'),
-    BottomNavigationBarItem(icon: Icon(Icons.history_rounded),     label: 'Histórico'),
-    BottomNavigationBarItem(icon: Icon(Icons.settings_rounded),    label: 'Definições'),
+    BottomNavigationBarItem(icon: Icon(Icons.home_rounded),     label: 'Início'),
+    BottomNavigationBarItem(icon: Icon(Icons.tune_rounded),     label: 'Controlo'),
+    BottomNavigationBarItem(icon: Icon(Icons.history_rounded),  label: 'Histórico'),
+    BottomNavigationBarItem(icon: Icon(Icons.settings_rounded), label: 'Definições'),
   ];
 
   @override
@@ -99,11 +105,11 @@ class _RootState extends State<_Root> {
           items: _navItems,
           backgroundColor: AppTheme.surface,
           selectedItemColor: AppTheme.accent,
-          unselectedItemColor: AppTheme.textMuted,
+          unselectedItemColor: AppTheme.textDisabled,
           type: BottomNavigationBarType.fixed,
           elevation: 0,
-          selectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: const TextStyle(fontSize: 11),
+          selectedLabelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+          unselectedLabelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
         ),
       ),
     );
