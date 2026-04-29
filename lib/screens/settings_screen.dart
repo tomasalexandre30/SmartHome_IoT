@@ -1,210 +1,130 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import '../services/smartspace_provider.dart';
+import '../services/beacon_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/widgets.dart';
 import '../models/models.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
-  @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends State<SettingsScreen> {
-  Thresholds _t = const Thresholds();
-  bool _autoLed = true, _autoBuzzer = true, _saved = false;
-
-  @override
-  void initState() { super.initState(); _load(); }
-
-  Future<void> _load() async {
-    final p = await SharedPreferences.getInstance();
-    setState(() {
-      _t = Thresholds(
-        tempMax: p.getDouble('tempMax') ?? 28.0,
-        tempMin: p.getDouble('tempMin') ?? 16.0,
-        humidityMax: p.getDouble('humMax') ?? 70.0,
-        luminosityAutoOn: p.getInt('luxAutoOn') ?? 300,
-      );
-      _autoLed    = p.getBool('autoLed')    ?? true;
-      _autoBuzzer = p.getBool('autoBuzzer') ?? true;
-    });
-  }
-
-  Future<void> _save() async {
-    final p = await SharedPreferences.getInstance();
-    await p.setDouble('tempMax', _t.tempMax);
-    await p.setDouble('tempMin', _t.tempMin);
-    await p.setDouble('humMax',  _t.humidityMax);
-    await p.setInt('luxAutoOn',  _t.luminosityAutoOn);
-    await p.setBool('autoLed',   _autoLed);
-    await p.setBool('autoBuzzer',_autoBuzzer);
-    setState(() => _saved = true);
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) setState(() => _saved = false);
-  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        surfaceTintColor: Colors.transparent,
-        title: const Text('Definições'),
-        bottom: PreferredSize(preferredSize: const Size.fromHeight(1),
-            child: Container(height: 1, color: AppColors.border)),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 250),
-              child: _saved
-                  ? Container(
-                  key: const ValueKey('saved'),
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.greenDim,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.check_rounded, color: AppColors.green, size: 14),
-                    const SizedBox(width: 4),
-                    Text('Guardado', style: GoogleFonts.inter(
-                        color: AppColors.green, fontSize: 12, fontWeight: FontWeight.w600)),
-                  ]))
-                  : TextButton(
-                  key: const ValueKey('save'),
-                  onPressed: _save,
-                  style: TextButton.styleFrom(
-                    backgroundColor: AppColors.indigo,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  ),
-                  child: Text('Guardar', style: GoogleFonts.inter(
-                      color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600))),
-            ),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
-        children: [
-          _GroupLabel(text: 'Automação'),
-          const SizedBox(height: 10),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(children: [
+    return Consumer2<SmartSpaceProvider, BeaconService>(
+      builder: (context, ss, ble, _) => Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(title: const Text('Definições')),
+        body: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          children: [
+
+            // ── BLE ─────────────────────────────────────────────────────
+            _GroupHeader(title: 'Bluetooth BLE'),
+            _SettingCard(children: [
               _ToggleRow(
-                icon: Icons.lightbulb_rounded,
-                iconColor: AppColors.indigo,
-                title: 'LED automático',
-                subtitle: 'Liga quando luminosidade baixa',
-                value: _autoLed,
-                onChanged: (v) => setState(() => _autoLed = v),
-              ),
-              const Divider(height: 1),
-              _ToggleRow(
-                icon: Icons.volume_up_rounded,
-                iconColor: AppColors.amber,
-                title: 'Buzzer automático',
-                subtitle: 'Alerta quando temperatura sobe',
-                value: _autoBuzzer,
-                onChanged: (v) => setState(() => _autoBuzzer = v),
+                icon: Icons.bluetooth_rounded,
+                label: 'Scan automático',
+                subtitle: 'Deteta a tua zona continuamente',
+                value: ble.scanning,
+                onChanged: (v) => v ? ble.startScanning() : ble.stopScanning(),
               ),
             ]),
-          ),
+            const SizedBox(height: 8),
 
-          const SizedBox(height: 24),
-          _GroupLabel(text: 'Temperatura (°C)'),
-          const SizedBox(height: 10),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(children: [
-              _SliderRow(label: 'Máximo', value: _t.tempMax, min: 20, max: 40,
-                  color: AppColors.rose, unit: '°C',
-                  onChanged: (v) => setState(() => _t = _t.copyWith(tempMax: v))),
-              const Divider(height: 1),
-              _SliderRow(label: 'Mínimo', value: _t.tempMin, min: 5, max: 22,
-                  color: AppColors.teal, unit: '°C',
-                  onChanged: (v) => setState(() => _t = _t.copyWith(tempMin: v))),
-            ]),
-          ),
-
-          const SizedBox(height: 24),
-          _GroupLabel(text: 'Humidade (%)'),
-          const SizedBox(height: 10),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: _SliderRow(label: 'Máximo', value: _t.humidityMax, min: 40, max: 95,
-                color: AppColors.teal, unit: '%',
-                onChanged: (v) => setState(() => _t = _t.copyWith(humidityMax: v))),
-          ),
-
-          const SizedBox(height: 24),
-          _GroupLabel(text: 'Luminosidade'),
-          const SizedBox(height: 10),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: _SliderRow(label: 'LED liga abaixo de', value: _t.luminosityAutoOn.toDouble(),
-                min: 50, max: 900, color: AppColors.amber, unit: '',
-                onChanged: (v) => setState(() => _t = _t.copyWith(luminosityAutoOn: v.round()))),
-          ),
-
-          const SizedBox(height: 28),
-          _GroupLabel(text: 'Payload MQTT'),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Container(width: 6, height: 6,
-                    decoration: const BoxDecoration(color: AppColors.green, shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                Text('home/config', style: AppText.label),
-              ]),
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.bg,
-                  borderRadius: BorderRadius.circular(10),
+            // Beacons list
+            _GroupHeader(title: 'Beacons Configurados'),
+            ...ble.beacons.map((b) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _BeaconConfigRow(beacon: b),
+            )),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: OutlinedButton.icon(
+                onPressed: () => _showAddBeaconDialog(context, ble),
+                icon: const Icon(Icons.add_rounded, color: AppTheme.accent),
+                label: const Text('Configurar UUID de Beacon', style: TextStyle(color: AppTheme.accent)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppTheme.border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
-                child: Text([
-                  '"tempMax": ${_t.tempMax}',
-                  '"tempMin": ${_t.tempMin}',
-                  '"humMax": ${_t.humidityMax}',
-                  '"luxAutoOn": ${_t.luminosityAutoOn}',
-                  '"autoLed": $_autoLed',
-                  '"autoBuzzer": $_autoBuzzer',
-                ].join('\n'),
-                    style: GoogleFonts.jetBrainsMono(
-                        color: AppColors.textSecondary, fontSize: 12, height: 1.8)),
+              ),
+            ),
+
+            // ── Preferências por zona ────────────────────────────────────
+            _GroupHeader(title: 'Preferências por Zona'),
+            ...ss.zones.map((z) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _ZonePreferencesCard(zone: z),
+            )),
+
+            // ── Sistema ──────────────────────────────────────────────────
+            _GroupHeader(title: 'Sistema'),
+            _SettingCard(children: [
+              _ToggleRow(
+                icon: Icons.cloud_rounded,
+                label: 'Ligação ao servidor',
+                subtitle: 'Firebase (disponível em breve)',
+                value: ss.isConnected,
+                onChanged: (v) => ss.setConnected(v),
+              ),
+              const Divider(height: 1),
+              _ActionRow(
+                icon: Icons.delete_sweep_rounded,
+                label: 'Limpar histórico',
+                subtitle: 'Remove todos os logs locais',
+                color: AppTheme.error,
+                onTap: () => _confirmClear(context, ss),
               ),
             ]),
+            const SizedBox(height: 24),
+
+            // ── About ────────────────────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: SS.glowCard(),
+              child: Column(
+                children: [
+                  Container(
+                    width: 48, height: 48,
+                    decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.location_city_rounded, color: Colors.white, size: 24),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('SmartSpace', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w700)),
+                  const Text('v1.0.0 • Fase 1 (BLE)', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  const SizedBox(height: 8),
+                  const Text('Sistemas de IoT e Móveis 2025/26\nNOVA School of Science & Technology',
+                      textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddBeaconDialog(BuildContext context, BeaconService ble) {
+    showDialog(
+      context: context,
+      builder: (_) => _AddBeaconDialog(ble: ble),
+    );
+  }
+
+  void _confirmClear(BuildContext context, SmartSpaceProvider ss) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surfaceCard,
+        title: const Text('Limpar histórico?', style: TextStyle(color: AppTheme.textPrimary)),
+        content: const Text('Esta ação não pode ser desfeita.', style: TextStyle(color: AppTheme.textMuted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () { Navigator.pop(context); /* TODO: clear logs */ },
+            child: const Text('Limpar', style: TextStyle(color: AppTheme.error)),
           ),
         ],
       ),
@@ -212,74 +132,310 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _GroupLabel extends StatelessWidget {
-  final String text;
-  const _GroupLabel({required this.text});
+// ── Zone Preferences Card ─────────────────────────────────────────────────────
+
+class _ZonePreferencesCard extends StatefulWidget {
+  final Zone zone;
+  const _ZonePreferencesCard({required this.zone});
+
   @override
-  Widget build(BuildContext context) => Text(text.toUpperCase(), style: AppText.label);
+  State<_ZonePreferencesCard> createState() => _ZonePreferencesCardState();
+}
+
+class _ZonePreferencesCardState extends State<_ZonePreferencesCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ss = context.watch<SmartSpaceProvider>();
+    final prefs = ss.preferencesFor(widget.zone.id);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        children: [
+          // Header
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(color: widget.zone.color.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+                    child: Icon(widget.zone.icon, color: widget.zone.color, size: 16),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(widget.zone.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
+                  const Spacer(),
+                  Icon(_expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: AppTheme.textMuted),
+                ],
+              ),
+            ),
+          ),
+
+          // Expanded preferences
+          if (_expanded) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                children: [
+                  // Light intensity
+                  Row(
+                    children: [
+                      const Icon(Icons.lightbulb_rounded, color: AppTheme.warning, size: 16),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text('Intensidade de luz', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
+                      Text('${(prefs.lightIntensity * 100).toInt()}%',
+                          style: const TextStyle(color: AppTheme.warning, fontSize: 13, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  Slider(
+                    value: prefs.lightIntensity,
+                    onChanged: (v) => ss.updatePreferences(prefs.copyWith(lightIntensity: v)),
+                    activeColor: AppTheme.warning,
+                    inactiveColor: AppTheme.border,
+                  ),
+
+                  // Temperature
+                  Row(
+                    children: [
+                      const Icon(Icons.thermostat_rounded, color: AppTheme.error, size: 16),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text('Temperatura preferida', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
+                      Text('${prefs.temperatureTarget.toStringAsFixed(0)}°C',
+                          style: const TextStyle(color: AppTheme.error, fontSize: 13, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  Slider(
+                    value: prefs.temperatureTarget,
+                    min: 16, max: 30,
+                    onChanged: (v) => ss.updatePreferences(prefs.copyWith(temperatureTarget: v)),
+                    activeColor: AppTheme.error,
+                    inactiveColor: AppTheme.border,
+                  ),
+
+                  // Do not disturb
+                  Row(
+                    children: [
+                      const Icon(Icons.do_not_disturb_on_rounded, color: AppTheme.textMuted, size: 16),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text('Não incomodar', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
+                      Switch(
+                        value: prefs.doNotDisturb,
+                        onChanged: (v) => ss.updatePreferences(prefs.copyWith(doNotDisturb: v)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Beacon Config Row ─────────────────────────────────────────────────────────
+
+class _BeaconConfigRow extends StatelessWidget {
+  final Beacon beacon;
+  const _BeaconConfigRow({required this.beacon});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AppTheme.surfaceCard,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: beacon.isNearby ? AppTheme.accent.withOpacity(0.4) : AppTheme.border),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.bluetooth_rounded, color: beacon.isNearby ? AppTheme.accent : AppTheme.textMuted, size: 18),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(beacon.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
+              Text(beacon.uuid, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+            ],
+          ),
+        ),
+        if (beacon.isNearby)
+          Text(beacon.signalBar, style: TextStyle(color: beacon.signalColor, fontSize: 12)),
+      ],
+    ),
+  );
+}
+
+// ── Add Beacon Dialog ─────────────────────────────────────────────────────────
+
+class _AddBeaconDialog extends StatefulWidget {
+  final BeaconService ble;
+  const _AddBeaconDialog({required this.ble});
+
+  @override
+  State<_AddBeaconDialog> createState() => _AddBeaconDialogState();
+}
+
+class _AddBeaconDialogState extends State<_AddBeaconDialog> {
+  final _nameCtrl  = TextEditingController();
+  final _uuidCtrl  = TextEditingController();
+  String _selectedZone = 'zone_a';
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.surfaceCard,
+      title: const Text('Configurar Beacon', style: TextStyle(color: AppTheme.textPrimary)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _nameCtrl,
+            style: const TextStyle(color: AppTheme.textPrimary),
+            decoration: const InputDecoration(labelText: 'Nome do beacon', hintText: 'ex: Beacon Sala'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _uuidCtrl,
+            style: const TextStyle(color: AppTheme.textPrimary),
+            decoration: const InputDecoration(labelText: 'UUID / MAC', hintText: 'ex: AA:BB:CC:DD:EE:FF'),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _selectedZone,
+            dropdownColor: AppTheme.surfaceCard,
+            style: const TextStyle(color: AppTheme.textPrimary),
+            decoration: const InputDecoration(labelText: 'Zona associada'),
+            items: const [
+              DropdownMenuItem(value: 'zone_a', child: Text('Sala')),
+              DropdownMenuItem(value: 'zone_b', child: Text('Quarto')),
+              DropdownMenuItem(value: 'zone_c', child: Text('Escritório')),
+            ],
+            onChanged: (v) => setState(() => _selectedZone = v!),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        ElevatedButton(
+          onPressed: () {
+            if (_nameCtrl.text.isNotEmpty && _uuidCtrl.text.isNotEmpty) {
+              widget.ble.registerBeacons([
+                Beacon(uuid: _uuidCtrl.text.trim(), name: _nameCtrl.text.trim(), zoneId: _selectedZone),
+              ]);
+              Navigator.pop(context);
+            }
+          },
+          child: const Text('Guardar'),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Helper Widgets ────────────────────────────────────────────────────────────
+
+class _GroupHeader extends StatelessWidget {
+  final String title;
+  const _GroupHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(0, 16, 0, 8),
+    child: Text(title.toUpperCase(),
+        style: const TextStyle(color: AppTheme.textMuted, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1)),
+  );
+}
+
+class _SettingCard extends StatelessWidget {
+  final List<Widget> children;
+  const _SettingCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: AppTheme.surfaceCard,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppTheme.border),
+    ),
+    child: Column(children: children),
+  );
 }
 
 class _ToggleRow extends StatelessWidget {
   final IconData icon;
-  final Color iconColor;
-  final String title, subtitle;
+  final String label;
+  final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const _ToggleRow({required this.icon, required this.iconColor, required this.title,
-    required this.subtitle, required this.value, required this.onChanged});
+
+  const _ToggleRow({required this.icon, required this.label, this.subtitle, required this.value, required this.onChanged});
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    child: Row(children: [
-      Container(
-        width: 36, height: 36,
-        decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-        child: Icon(icon, color: iconColor, size: 18),
-      ),
-      const SizedBox(width: 14),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: AppText.title),
-        Text(subtitle, style: AppText.body),
-      ])),
-      Switch(value: value, onChanged: onChanged),
-    ]),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    child: Row(
+      children: [
+        Icon(icon, color: value ? AppTheme.accent : AppTheme.textMuted, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
+              if (subtitle != null) Text(subtitle!, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+            ],
+          ),
+        ),
+        Switch(value: value, onChanged: onChanged),
+      ],
+    ),
   );
 }
 
-class _SliderRow extends StatelessWidget {
-  final String label, unit;
-  final double value, min, max;
+class _ActionRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? subtitle;
   final Color color;
-  final ValueChanged<double> onChanged;
-  const _SliderRow({required this.label, required this.value, required this.min,
-    required this.max, required this.color, required this.unit, required this.onChanged});
+  final VoidCallback onTap;
+
+  const _ActionRow({required this.icon, required this.label, this.subtitle, required this.color, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-    child: Column(children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: AppText.title),
-        Text(
-            '${value % 1 == 0 ? value.toInt() : value.toStringAsFixed(1)}$unit',
-            style: GoogleFonts.inter(color: color, fontSize: 15, fontWeight: FontWeight.w700)),
-      ]),
-      SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-            activeTrackColor: color, thumbColor: color,
-            overlayColor: color.withOpacity(0.12)),
-        child: Slider(
-          value: value.clamp(min, max), min: min, max: max,
-          divisions: ((max - min)).round(),
-          onChanged: onChanged,
-        ),
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: TextStyle(color: color, fontSize: 14)),
+                if (subtitle != null) Text(subtitle!, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, color: color, size: 18),
+        ],
       ),
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text('${min.toInt()}$unit', style: AppText.body),
-        Text('${max.toInt()}$unit', style: AppText.body),
-      ]),
-    ]),
+    ),
   );
 }

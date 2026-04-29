@@ -1,277 +1,262 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../services/smartspace_provider.dart';
+import '../services/beacon_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/widgets.dart';
 import '../models/models.dart';
 
-class ControlScreen extends StatefulWidget {
+class ControlScreen extends StatelessWidget {
   const ControlScreen({super.key});
-  @override
-  State<ControlScreen> createState() => _ControlScreenState();
-}
-
-class _ControlScreenState extends State<ControlScreen> {
-  ActuatorState _state = const ActuatorState();
-
-  void _send(ActuatorState s) {
-    setState(() => _state = s);
-    debugPrint('MQTT: ${s.toJson()}');
-  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        title: const Text('Controlo'),
-        bottom: PreferredSize(preferredSize: const Size.fromHeight(1),
-            child: Container(height: 1, color: AppColors.border)),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
-        children: [
-          _LedCard(state: _state, onChanged: _send),
-          const SizedBox(height: 16),
-          _BuzzerCard(state: _state, onChanged: _send),
-          const SizedBox(height: 24),
-          Text('MODOS RÁPIDOS', style: AppText.label),
-          const SizedBox(height: 12),
-          _QuickModes(onSelect: _send),
-          const SizedBox(height: 24),
-          _PayloadCard(state: _state),
-        ],
-      ),
-    );
-  }
-}
-
-class _LedCard extends StatelessWidget {
-  final ActuatorState state;
-  final ValueChanged<ActuatorState> onChanged;
-  const _LedCard({required this.state, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: state.ledOn ? AppColors.indigo.withOpacity(0.3) : AppColors.border),
-      ),
-      child: Column(children: [
-        // Header toggle
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
-          child: Row(children: [
-            Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                color: state.ledOn ? AppColors.indigo : AppColors.bg,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.lightbulb_rounded,
-                  color: state.ledOn ? Colors.white : AppColors.textSecondary, size: 20),
+    return Consumer2<SmartSpaceProvider, BeaconService>(
+      builder: (context, ss, ble, _) => Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text('Controlo'),
+          actions: [
+            _ManualZoneSelector(
+              zones: ss.zones,
+              currentZoneId: ss.currentZoneId,
+              onSelect: (id) => ss.updateZoneFromBeacon(id),
             ),
-            const SizedBox(width: 14),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('LED RGB', style: AppText.title),
-              Text(state.ledOn ? 'Ligado' : 'Desligado', style: AppText.body),
-            ]),
-            const Spacer(),
-            Switch(value: state.ledOn, onChanged: (v) => onChanged(state.copyWith(ledOn: v))),
-          ]),
+          ],
         ),
+        body: ss.zones.isEmpty
+            ? const Center(child: Text('Sem zonas configuradas'))
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                itemCount: ss.zones.length,
+                itemBuilder: (context, i) => Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: _ZoneControlCard(zone: ss.zones[i], isCurrentZone: ss.currentZoneId == ss.zones[i].id),
+                ),
+              ),
+      ),
+    );
+  }
+}
 
-        if (state.ledOn) ...[
-          Container(height: 1, color: AppColors.border),
+// ── Zone Control Card ─────────────────────────────────────────────────────────
+
+class _ZoneControlCard extends StatelessWidget {
+  final Zone zone;
+  final bool isCurrentZone;
+  const _ZoneControlCard({required this.zone, required this.isCurrentZone});
+
+  @override
+  Widget build(BuildContext context) {
+    final ss = context.read<SmartSpaceProvider>();
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isCurrentZone ? zone.color : AppTheme.border, width: isCurrentZone ? 1.5 : 1),
+        boxShadow: isCurrentZone ? [BoxShadow(color: zone.color.withOpacity(0.15), blurRadius: 20)] : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Brilho
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('BRILHO', style: AppText.label),
-                Text('${(state.ledBrightness * 100).round()}%',
-                    style: GoogleFonts.inter(color: AppColors.indigo, fontSize: 13, fontWeight: FontWeight.w700)),
-              ]),
-              const SizedBox(height: 4),
-              Slider(value: state.ledBrightness, min: 0.05, max: 1.0,
-                  onChanged: (v) => onChanged(state.copyWith(ledBrightness: v))),
-              const SizedBox(height: 16),
-
-              // Cor
-              Text('COR', style: AppText.label),
-              const SizedBox(height: 10),
-              Row(children: LedColor.values.map((c) {
-                final sel = state.ledColor == c;
-                return Expanded(child: GestureDetector(
-                  onTap: () => onChanged(state.copyWith(ledColor: c)),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    decoration: BoxDecoration(
-                      color: sel ? AppColors.indigoLight : AppColors.bg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: sel ? AppColors.indigo : AppColors.border,
-                        width: sel ? 1.5 : 1,
-                      ),
-                    ),
-                    child: Column(children: [
-                      Container(width: 16, height: 16,
-                          decoration: BoxDecoration(
-                            color: _col(c), shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.border),
-                          )),
-                      const SizedBox(height: 5),
-                      Text(c.displayName, style: GoogleFonts.inter(
-                          color: sel ? AppColors.indigo : AppColors.textSecondary,
-                          fontSize: 10, fontWeight: sel ? FontWeight.w700 : FontWeight.w400)),
-                    ]),
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: zone.color.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+                  child: Icon(zone.icon, color: zone.color, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(zone.name, style: Theme.of(context).textTheme.titleMedium),
+                      Text('${zone.occupantCount} ocupante${zone.occupantCount != 1 ? "s" : ""}',
+                          style: Theme.of(context).textTheme.bodySmall),
+                    ],
                   ),
-                ));
-              }).toList()),
-            ]),
+                ),
+                if (isCurrentZone)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: SS.pill(color: zone.color),
+                    child: Text('Aqui', style: TextStyle(color: zone.color, fontSize: 11, fontWeight: FontWeight.w700)),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // Quick commands
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Comandos Rápidos', style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(child: _CommandButton(
+                      icon: zone.lightOn ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
+                      label: zone.lightOn ? 'Apagar Luz' : 'Ligar Luz',
+                      color: AppTheme.warning,
+                      active: zone.lightOn,
+                      onTap: () => ss.toggleLight(zone.id),
+                    )),
+                    const SizedBox(width: 10),
+                    Expanded(child: _CommandButton(
+                      icon: zone.buzzerOn ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                      label: zone.buzzerOn ? 'Calar Buzzer' : 'Ativar Buzzer',
+                      color: AppTheme.error,
+                      active: zone.buzzerOn,
+                      onTap: () => ss.toggleBuzzer(zone.id),
+                    )),
+                  ],
+                ),
+                if (zone.lightOn) ...[
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Icon(Icons.brightness_6_rounded, color: AppTheme.textMuted, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Slider(
+                          value: zone.lightIntensity,
+                          onChanged: (v) => ss.setLightIntensity(zone.id, v),
+                          activeColor: AppTheme.warning,
+                          inactiveColor: AppTheme.border,
+                        ),
+                      ),
+                      const Icon(Icons.brightness_7_rounded, color: AppTheme.warning, size: 16),
+                    ],
+                  ),
+                ],
+
+                // Sensor summary
+                if (zone.temperature != null || zone.luminosity != null) ...[
+                  const SizedBox(height: 14),
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      if (zone.temperature != null) ...[
+                        const Icon(Icons.thermostat_rounded, color: AppTheme.warning, size: 14),
+                        const SizedBox(width: 4),
+                        Text('${zone.temperature!.toStringAsFixed(1)}°C', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                        const SizedBox(width: 12),
+                      ],
+                      if (zone.humidity != null) ...[
+                        const Icon(Icons.water_drop_rounded, color: AppTheme.accent, size: 14),
+                        const SizedBox(width: 4),
+                        Text('${zone.humidity!.toStringAsFixed(0)}%', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                        const SizedBox(width: 12),
+                      ],
+                      if (zone.luminosity != null) ...[
+                        const Icon(Icons.wb_sunny_rounded, color: AppTheme.warning, size: 14),
+                        const SizedBox(width: 4),
+                        Text('${zone.luminosity!.toStringAsFixed(0)} lx', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                      ],
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
         ],
-      ]),
-    );
-  }
-
-  Color _col(LedColor c) {
-    switch (c) {
-      case LedColor.white:  return const Color(0xFFF9FAFB);
-      case LedColor.warm:   return const Color(0xFFFCD34D);
-      case LedColor.cyan:   return const Color(0xFF67E8F9);
-      case LedColor.orange: return const Color(0xFFFB923C);
-    }
-  }
-}
-
-class _BuzzerCard extends StatelessWidget {
-  final ActuatorState state;
-  final ValueChanged<ActuatorState> onChanged;
-  const _BuzzerCard({required this.state, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: state.buzzerOn ? AppColors.amber.withOpacity(0.4) : AppColors.border),
       ),
-      child: Row(children: [
-        Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(
-            color: state.buzzerOn ? AppColors.amberDim : AppColors.bg,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(state.buzzerOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-              color: state.buzzerOn ? AppColors.amber : AppColors.textSecondary, size: 20),
-        ),
-        const SizedBox(width: 14),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Buzzer', style: AppText.title),
-          Text(state.buzzerOn ? 'A tocar' : 'Silencioso', style: AppText.body),
-        ]),
-        const Spacer(),
-        Switch(
-          value: state.buzzerOn,
-          thumbColor: WidgetStateProperty.all(Colors.white),
-          trackColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? AppColors.amber : AppColors.border),
-          trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
-          onChanged: (v) => onChanged(state.copyWith(buzzerOn: v)),
-        ),
-      ]),
     );
   }
 }
 
-class _QuickModes extends StatelessWidget {
-  final ValueChanged<ActuatorState> onSelect;
-  const _QuickModes({required this.onSelect});
+class _CommandButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _CommandButton({required this.icon, required this.label, required this.color,
+      required this.active, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
-    final modes = [
-      ('Foco',     '💡', 'Branco intenso',
-      const ActuatorState(ledOn: true, ledBrightness: 1.0, ledColor: LedColor.white)),
-      ('Noturno',  '🌙', 'Quente e suave',
-      const ActuatorState(ledOn: true, ledBrightness: 0.2, ledColor: LedColor.warm)),
-      ('Alerta',   '🔔', 'LED + buzzer',
-      const ActuatorState(ledOn: true, ledBrightness: 1.0, ledColor: LedColor.orange, buzzerOn: true)),
-      ('Desligar', '⏹', 'Tudo off',
-      const ActuatorState()),
-    ];
-    return GridView.count(
-      crossAxisCount: 2, shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 2.0,
-      children: modes.map((m) => GestureDetector(
-        onTap: () => onSelect(m.$4),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(children: [
-            Text(m.$1 == 'Desligar' ? '⏹' : m.$2, style: const TextStyle(fontSize: 22)),
-            const SizedBox(width: 10),
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(m.$1, style: AppText.title),
-                Text(m.$3, style: AppText.body),
-              ],
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: active ? color.withOpacity(0.15) : AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: active ? color.withOpacity(0.4) : AppTheme.border),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: active ? color : AppTheme.textMuted, size: 22),
+          const SizedBox(height: 6),
+          Text(label, style: TextStyle(
+            color: active ? color : AppTheme.textMuted,
+            fontSize: 12, fontWeight: FontWeight.w500,
+          ), textAlign: TextAlign.center),
+        ],
+      ),
+    ),
+  );
+}
+
+// ── Manual Zone Selector ──────────────────────────────────────────────────────
+
+class _ManualZoneSelector extends StatelessWidget {
+  final List<Zone> zones;
+  final String? currentZoneId;
+  final ValueChanged<String?> onSelect;
+
+  const _ManualZoneSelector({required this.zones, this.currentZoneId, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    icon: const Icon(Icons.room_rounded, color: AppTheme.accent),
+    tooltip: 'Simular zona',
+    onPressed: () => showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Simular zona atual', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            const Text('Para testes sem beacons físicos', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+            const SizedBox(height: 16),
+            ...zones.map((z) => ListTile(
+              leading: Icon(z.icon, color: z.color),
+              title: Text(z.name, style: const TextStyle(color: AppTheme.textPrimary)),
+              trailing: currentZoneId == z.id
+                  ? const Icon(Icons.check_circle_rounded, color: AppTheme.success)
+                  : null,
+              onTap: () {
+                onSelect(z.id);
+                Navigator.pop(context);
+              },
             )),
-          ]),
+            ListTile(
+              leading: const Icon(Icons.clear_rounded, color: AppTheme.textMuted),
+              title: const Text('Nenhuma zona', style: TextStyle(color: AppTheme.textMuted)),
+              onTap: () { onSelect(null); Navigator.pop(context); },
+            ),
+          ],
         ),
-      )).toList(),
-    );
-  }
-}
-
-class _PayloadCard extends StatelessWidget {
-  final ActuatorState state;
-  const _PayloadCard({required this.state});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(
-            width: 6, height: 6,
-            decoration: const BoxDecoration(color: AppColors.green, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 6),
-          Text('MQTT → home/sala/control', style: AppText.label),
-        ]),
-        const SizedBox(height: 12),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            state.toJson().entries.map((e) => '"${e.key}": ${e.value}').join('\n'),
-            style: GoogleFonts.jetBrainsMono(color: AppColors.textSecondary, fontSize: 12, height: 1.8),
-          ),
-        ),
-      ]),
-    );
-  }
+    ),
+  );
 }

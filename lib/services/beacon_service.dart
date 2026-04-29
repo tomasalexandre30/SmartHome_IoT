@@ -1,125 +1,180 @@
 import 'dart:async';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../models/models.dart';
 
-class BeaconService {
-  static final BeaconService _instance = BeaconService._internal();
-  factory BeaconService() => _instance;
-  BeaconService._internal();
-
-  // UUID dos teus beacons (todos iguais)
-  static const String targetUUID = 'fda50693-a4e2-4fb1-afcf-c6eb07647825';
-
-  final _roomController    = StreamController<Room>.broadcast();
-  final _beaconsController = StreamController<List<BeaconReading>>.broadcast();
-
-  Stream<Room>                get roomStream    => _roomController.stream;
-  Stream<List<BeaconReading>> get beaconsStream => _beaconsController.stream;
-
-  Room _currentRoom = Room.unknown;
-  Room get currentRoom => _currentRoom;
-
+class BeaconService extends ChangeNotifier {
+  // ── State ──────────────────────────────────────────────────────────────
   bool _scanning = false;
+  bool get scanning => _scanning;
+
+  String? _currentZoneId;
+  String? get currentZoneId => _currentZoneId;
+
+  final Map<String, Beacon> _beacons = {};
+  List<Beacon> get beacons => _beacons.values.toList();
+
+  // Known beacons registry (uuid → Beacon)
+  final Map<String, Beacon> _registry = {};
+
   StreamSubscription<List<ScanResult>>? _scanSub;
-  StreamSubscription<bool>?             _stateSub;
+  Timer? _zoneTimer;
+
+  // RSSI smoothing: keep last N readings per UUID
+  static const int _smoothingWindow = 5;
+  final Map<String, List<int>> _rssiHistory = {};
+
+  // ── Init ───────────────────────────────────────────────────────────────
+
+  void registerBeacons(List<Beacon> beacons) {
+    for (final b in beacons) {
+      _registry[b.uuid.toLowerCase()] = b;
+      _beacons[b.uuid] = b;
+    }
+    notifyListeners();
+  }
+
+  // ── Scanning ───────────────────────────────────────────────────────────
 
   Future<void> startScanning() async {
     if (_scanning) return;
     _scanning = true;
-    await FlutterBluePlus.stopScan();
-    _doScan();
-    _stateSub = FlutterBluePlus.isScanning.listen((isScanning) {
-      if (!isScanning && _scanning) {
-        Future.delayed(const Duration(seconds: 2), _doScan);
-      }
-    });
+    notifyListeners();
+
+    await FlutterBluePlus.startScan(
+      timeout: const Duration(seconds: 0), // continuous
+      androidUsesFineLocation: true,
+    );
+
+    _scanSub = FlutterBluePlus.onScanResults.listen(_onScanResults);
+
+    // Re-evaluate zone every 2 seconds
+    _zoneTimer = Timer.periodic(const Duration(seconds: 2), (_) => _evaluateZone());
   }
 
-  void _doScan() {
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
-    _scanSub?.cancel();
-    _scanSub = FlutterBluePlus.scanResults.listen((results) {
-      final beacons = <BeaconReading>[];
+  Future<void> stopScanning() async {
+    _scanning = false;
+    await _scanSub?.cancel();
+    _zoneTimer?.cancel();
+    await FlutterBluePlus.stopScan();
+    notifyListeners();
+  }
 
-      for (final result in results) {
-        // Identifica pelo MAC address
-        final mac = result.device.remoteId.str.toUpperCase();
-        final room = Room.fromMac(mac);
-        if (room == Room.unknown) continue;
+  // ── Result processing ──────────────────────────────────────────────────
 
-        // Tenta fazer parse iBeacon para obter txPower
-        int txPower = -59; // valor default
-        final msd = result.advertisementData.manufacturerData;
-        for (final entry in msd.entries) {
-          final data = entry.value;
-          if (data.length >= 23 && data[0] == 0x02 && data[1] == 0x15) {
-            txPower = data[22].toSigned(8);
+  void _onScanResults(List<ScanResult> results) {
+    for (final r in results) {
+      final mac = r.device.remoteId.str.toLowerCase();
+
+      // Match by MAC or by advertised name prefix
+      Beacon? matched;
+      for (final entry in _registry.entries) {
+        if (mac == entry.key.toLowerCase() ||
+            r.device.platformName.toLowerCase().contains(entry.value.name.toLowerCase())) {
+          matched = entry.value;
+          break;
+        }
+      }
+
+      // Try matching by advertised UUIDs
+      if (matched == null) {
+        final advUuids = r.advertisementData.serviceUuids
+            .map((u) => u.toString().toLowerCase())
+            .toList();
+        for (final entry in _registry.entries) {
+          if (advUuids.any((u) => u.contains(entry.key.toLowerCase().replaceAll('-', '')))) {
+            matched = entry.value;
+            break;
           }
         }
-
-        final distance = _estimateDistance(txPower, result.rssi);
-        beacons.add(BeaconReading(
-          mac:      mac,
-          rssi:     result.rssi,
-          distance: distance,
-          room:     room,
-        ));
       }
 
-      // Ordena por RSSI (mais forte = mais próximo)
-      beacons.sort((a, b) => b.rssi.compareTo(a.rssi));
-      _beaconsController.add(beacons);
+      if (matched == null) continue;
 
-      final newRoom = beacons.isNotEmpty ? beacons.first.room : Room.unknown;
-      if (newRoom != _currentRoom) {
-        _currentRoom = newRoom;
-        _roomController.add(_currentRoom);
+      // Smooth RSSI
+      _rssiHistory.putIfAbsent(matched.uuid, () => []);
+      _rssiHistory[matched.uuid]!.add(r.rssi);
+      if (_rssiHistory[matched.uuid]!.length > _smoothingWindow) {
+        _rssiHistory[matched.uuid]!.removeAt(0);
       }
-    });
+      final smoothedRssi = (_rssiHistory[matched.uuid]!.reduce((a, b) => a + b) /
+              _rssiHistory[matched.uuid]!.length)
+          .round();
+
+      final distance = _estimateDistance(matched, smoothedRssi);
+      _beacons[matched.uuid] = matched.copyWith(
+        rssi: smoothedRssi,
+        distance: distance,
+        lastSeen: DateTime.now(),
+      );
+    }
+    notifyListeners();
   }
 
-  void stopScanning() {
-    _scanning = false;
-    _scanSub?.cancel();
-    _stateSub?.cancel();
-    FlutterBluePlus.stopScan();
+  void _evaluateZone() {
+    final nearby = _beacons.values
+        .where((b) => b.isNearby)
+        .toList()
+      ..sort((a, b) => b.rssi.compareTo(a.rssi));
+
+    final newZone = nearby.isNotEmpty ? nearby.first.zoneId : null;
+    if (newZone != _currentZoneId) {
+      _currentZoneId = newZone;
+      notifyListeners();
+    }
+
+    // Expire stale beacons
+    for (final b in _beacons.values) {
+      if (DateTime.now().difference(b.lastSeen).inSeconds > 15) {
+        _rssiHistory.remove(b.uuid);
+      }
+    }
   }
 
-  double _estimateDistance(int txPower, int rssi) {
+  // ── Distance estimation ────────────────────────────────────────────────
+  // Uses log-distance path loss model
+
+  double _estimateDistance(Beacon beacon, int rssi) {
     if (rssi == 0) return -1.0;
+    // txPower: typical iBeacon measured power at 1m = -59 dBm
+    const txPower = -59;
     final ratio = rssi / txPower;
-    if (ratio < 1.0) return ratio.abs();
-    return 0.89976 * (ratio * ratio * ratio) + 7.7095 * ratio + 0.111;
+    if (ratio < 1.0) return pow(ratio, 10).toDouble();
+    return 0.89976 * pow(ratio, 7.7095) + 0.111;
   }
 
+  // ── Manual zone override (for testing without beacons) ─────────────────
+
+  void setZoneManually(String? zoneId) {
+    _currentZoneId = zoneId;
+    notifyListeners();
+  }
+
+  // ── Mock data (demo mode) ──────────────────────────────────────────────
+
+  void injectMockReading(String beaconUuid, int rssi) {
+    final b = _beacons[beaconUuid];
+    if (b == null) return;
+    _rssiHistory.putIfAbsent(beaconUuid, () => []);
+    _rssiHistory[beaconUuid]!.add(rssi);
+    if (_rssiHistory[beaconUuid]!.length > _smoothingWindow) {
+      _rssiHistory[beaconUuid]!.removeAt(0);
+    }
+    final smoothed = (_rssiHistory[beaconUuid]!.reduce((a, b) => a + b) /
+            _rssiHistory[beaconUuid]!.length)
+        .round();
+    _beacons[beaconUuid] = b.copyWith(
+      rssi: smoothed,
+      distance: _estimateDistance(b, smoothed),
+      lastSeen: DateTime.now(),
+    );
+    _evaluateZone();
+  }
+
+  @override
   void dispose() {
     stopScanning();
-    _roomController.close();
-    _beaconsController.close();
+    super.dispose();
   }
-}
-
-class BeaconReading {
-  final String mac;
-  final int rssi;
-  final double distance;
-  final Room room;
-
-  const BeaconReading({
-    required this.mac,
-    required this.rssi,
-    required this.distance,
-    required this.room,
-  });
-
-  String get signalBar {
-    if (rssi > -60) return '▂▄▆█';
-    if (rssi > -70) return '▂▄▆░';
-    if (rssi > -80) return '▂▄░░';
-    return '▂░░░';
-  }
-
-  // Major/Minor não usados (todos iguais), mas mantemos por compatibilidade
-  int get major => 1;
-  int get minor => 2;
 }

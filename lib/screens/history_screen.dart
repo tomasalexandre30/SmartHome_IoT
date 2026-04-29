@@ -1,207 +1,236 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../services/smartspace_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/widgets.dart';
 import '../models/models.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
+
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProviderStateMixin {
-  late TabController _tab;
-  final List<HistoryPoint> _data = HistoryPoint.sampleData;
-
-  @override
-  void initState() { super.initState(); _tab = TabController(length: 3, vsync: this); }
-  @override
-  void dispose() { _tab.dispose(); super.dispose(); }
+class _HistoryScreenState extends State<HistoryScreen> {
+  LogEventType? _filter;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        title: const Text('Histórico'),
-        surfaceTintColor: Colors.transparent,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(49),
-          child: Container(
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppColors.border)),
+    return Consumer<SmartSpaceProvider>(builder: (context, ss, _) {
+      final logs = _filter == null
+          ? ss.logs
+          : ss.logs.where((e) => e.type == _filter).toList();
+
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text('Histórico'),
+          actions: [
+            IconButton(
+              icon: Icon(_filter != null ? Icons.filter_alt_rounded : Icons.filter_alt_outlined,
+                  color: _filter != null ? AppTheme.accent : AppTheme.textMuted),
+              onPressed: _showFilterSheet,
+              tooltip: 'Filtrar',
             ),
-            child: TabBar(
-              controller: _tab,
-              indicatorColor: AppColors.indigo,
-              indicatorWeight: 2.5,
-              labelColor: AppColors.indigo,
-              unselectedLabelColor: AppColors.textSecondary,
-              labelStyle: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600),
-              unselectedLabelStyle: GoogleFonts.inter(fontSize: 13),
-              dividerColor: Colors.transparent,
-              tabs: const [Tab(text: 'Temperatura'), Tab(text: 'Humidade'), Tab(text: 'Luz')],
+          ],
+        ),
+        body: Column(
+          children: [
+            // Stats bar
+            _StatsBar(logs: ss.logs),
+
+            // Filter chip
+            if (_filter != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: SS.pill(color: AppTheme.accent),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_filterLabel(_filter!), style: const TextStyle(color: AppTheme.accent, fontSize: 12)),
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: () => setState(() => _filter = null),
+                            child: const Icon(Icons.close_rounded, color: AppTheme.accent, size: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('${logs.length} eventos', style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  ],
+                ),
+              ),
+
+            // Log list
+            Expanded(
+              child: logs.isEmpty
+                  ? const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.history_rounded, color: AppTheme.textMuted, size: 48),
+                          SizedBox(height: 12),
+                          Text('Nenhum evento registado', style: TextStyle(color: AppTheme.textMuted)),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                      itemCount: logs.length,
+                      itemBuilder: (context, i) {
+                        final showDateHeader = i == 0 ||
+                            !_sameDay(logs[i].timestamp, logs[i - 1].timestamp);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (showDateHeader) _DateHeader(date: logs[i].timestamp),
+                            LogTile(event: logs[i]),
+                          ],
+                        );
+                      },
+                    ),
             ),
-          ),
+          ],
+        ),
+      );
+    });
+  }
+
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  void _showFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Filtrar por tipo', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: LogEventType.values.map((t) => GestureDetector(
+                onTap: () {
+                  setState(() => _filter = t == _filter ? null : t);
+                  Navigator.pop(context);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: SS.pill(color: _filter == t ? AppTheme.accent : AppTheme.textMuted),
+                  child: Text(_filterLabel(t),
+                      style: TextStyle(color: _filter == t ? AppTheme.accent : AppTheme.textMuted, fontSize: 13)),
+                ),
+              )).toList(),
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
       ),
-      body: Column(children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child: _SummaryRow(data: _data),
-        ),
-        Expanded(child: TabBarView(
-          controller: _tab,
-          children: [
-            _ChartPanel(data: _data, getValue: (p) => p.temperature,
-                color: AppColors.green, unit: '°C', label: 'Temperatura'),
-            _ChartPanel(data: _data, getValue: (p) => p.humidity,
-                color: AppColors.teal, unit: '%', label: 'Humidade'),
-            _ChartPanel(data: _data, getValue: (p) => p.luminosityPercent,
-                color: AppColors.amber, unit: '%', label: 'Luminosidade'),
-          ],
-        )),
-      ]),
     );
   }
-}
 
-class _SummaryRow extends StatelessWidget {
-  final List<HistoryPoint> data;
-  const _SummaryRow({required this.data});
-  @override
-  Widget build(BuildContext context) {
-    if (data.isEmpty) return const SizedBox();
-    final temps = data.map((d) => d.temperature).toList();
-    final hums  = data.map((d) => d.humidity).toList();
-    return Row(children: [
-      Expanded(child: _StatChip(label: 'Temp. média',
-          value: '${(temps.reduce((a,b) => a+b) / temps.length).toStringAsFixed(1)}°C',
-          color: AppColors.green)),
-      const SizedBox(width: 10),
-      Expanded(child: _StatChip(label: 'Hum. média',
-          value: '${(hums.reduce((a,b) => a+b) / hums.length).toStringAsFixed(0)}%',
-          color: AppColors.teal)),
-      const SizedBox(width: 10),
-      Expanded(child: _StatChip(label: 'Registos',
-          value: '${data.length}', color: AppColors.indigo)),
-    ]);
+  String _filterLabel(LogEventType t) {
+    switch (t) {
+      case LogEventType.zoneEntry:          return 'Entradas';
+      case LogEventType.zoneExit:           return 'Saídas';
+      case LogEventType.manualCommand:      return 'Comandos manuais';
+      case LogEventType.automationTrigger:  return 'Automações';
+      case LogEventType.connectionLost:     return 'Falhas de ligação';
+      case LogEventType.connectionRestored: return 'Ligações restabelecidas';
+      case LogEventType.alert:              return 'Alertas';
+    }
   }
 }
 
-class _StatChip extends StatelessWidget {
-  final String label, value;
-  final Color color;
-  const _StatChip({required this.label, required this.value, required this.color});
+// ── Stats Bar ──────────────────────────────────────────────────────────────────
+
+class _StatsBar extends StatelessWidget {
+  final List<LogEvent> logs;
+  const _StatsBar({required this.logs});
+
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: AppColors.border),
+  Widget build(BuildContext context) {
+    final entries = logs.where((e) => e.type == LogEventType.zoneEntry).length;
+    final automations = logs.where((e) => e.type == LogEventType.automationTrigger).length;
+    final commands = logs.where((e) => e.type == LogEventType.manualCommand).length;
+    final alerts = logs.where((e) => e.type == LogEventType.alert).length;
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
+      decoration: SS.glowCard(),
+      child: Row(
+        children: [
+          _Stat(value: '$entries', label: 'Entradas', color: AppTheme.success),
+          _divider(),
+          _Stat(value: '$automations', label: 'Automações', color: const Color(0xFF8B5CF6)),
+          _divider(),
+          _Stat(value: '$commands', label: 'Comandos', color: AppTheme.accent),
+          _divider(),
+          _Stat(value: '$alerts', label: 'Alertas', color: AppTheme.warning),
+        ],
+      ),
+    );
+  }
+
+  Widget _divider() => Container(width: 1, height: 30, color: AppTheme.border, margin: const EdgeInsets.symmetric(horizontal: 8));
+}
+
+class _Stat extends StatelessWidget {
+  final String value, label;
+  final Color color;
+  const _Stat({required this.value, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Column(
+      children: [
+        Text(value, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w700)),
+        Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10), textAlign: TextAlign.center),
+      ],
     ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label.toUpperCase(), style: AppText.label),
-      const SizedBox(height: 4),
-      Text(value, style: GoogleFonts.inter(
-          color: color, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
-    ]),
   );
 }
 
-class _ChartPanel extends StatelessWidget {
-  final List<HistoryPoint> data;
-  final double Function(HistoryPoint) getValue;
-  final Color color;
-  final String unit, label;
-  const _ChartPanel({required this.data, required this.getValue,
-    required this.color, required this.unit, required this.label});
+// ── Date header ───────────────────────────────────────────────────────────────
+
+class _DateHeader extends StatelessWidget {
+  final DateTime date;
+  const _DateHeader({required this.date});
 
   @override
   Widget build(BuildContext context) {
-    if (data.isEmpty) return Center(child: Text('Sem dados', style: AppText.body));
-    final values = data.map(getValue).toList();
-    final minVal = values.reduce((a,b) => a < b ? a : b) - 2;
-    final maxVal = values.reduce((a,b) => a > b ? a : b) + 2;
-    final spots = data.asMap().entries.map((e) => FlSpot(e.key.toDouble(), getValue(e.value))).toList();
+    final now = DateTime.now();
+    String label;
+    if (date.year == now.year && date.month == now.month && date.day == now.day) {
+      label = 'Hoje';
+    } else if (date.year == now.year && date.month == now.month && date.day == now.day - 1) {
+      label = 'Ontem';
+    } else {
+      label = '${date.day.toString().padLeft(2,'0')}/${date.month.toString().padLeft(2,'0')}/${date.year}';
+    }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(getValue(data.last).toStringAsFixed(1),
-              style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 40,
-                  fontWeight: FontWeight.w700, letterSpacing: -1.5)),
-          Padding(padding: const EdgeInsets.only(bottom: 6),
-              child: Text(unit, style: GoogleFonts.inter(
-                  color: AppColors.textSecondary, fontSize: 18, fontWeight: FontWeight.w400))),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text('Agora', style: GoogleFonts.inter(
-                color: color, fontSize: 11, fontWeight: FontWeight.w600)),
-          ),
-        ]),
-        Text('Últimas ${data.length} leituras · $label', style: AppText.body),
-        const SizedBox(height: 24),
-        Expanded(child: LineChart(LineChartData(
-          minY: minVal, maxY: maxVal,
-          gridData: FlGridData(
-            show: true, drawVerticalLine: false,
-            horizontalInterval: (maxVal - minVal) / 4,
-            getDrawingHorizontalLine: (_) => const FlLine(color: AppColors.border, strokeWidth: 1),
-          ),
-          borderData: FlBorderData(show: false),
-          titlesData: FlTitlesData(
-            leftTitles: AxisTitles(sideTitles: SideTitles(
-              showTitles: true, reservedSize: 36,
-              interval: (maxVal - minVal) / 4,
-              getTitlesWidget: (v, _) => Text(v.toStringAsFixed(0),
-                  style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 10)),
-            )),
-            bottomTitles: AxisTitles(sideTitles: SideTitles(
-              showTitles: true, reservedSize: 28, interval: 1,
-              getTitlesWidget: (v, _) {
-                final i = v.toInt();
-                if (i < 0 || i >= data.length) return const SizedBox();
-                return Padding(padding: const EdgeInsets.only(top: 6),
-                    child: Text('${data[i].time.hour}h',
-                        style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 10)));
-              },
-            )),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          ),
-          lineBarsData: [LineChartBarData(
-            spots: spots, isCurved: true, curveSmoothness: 0.35,
-            color: color, barWidth: 2.5,
-            dotData: FlDotData(show: true, getDotPainter: (_, __, ___, i) =>
-                FlDotCirclePainter(
-                    radius: i == data.length - 1 ? 5 : 0,
-                    color: color, strokeWidth: 0, strokeColor: Colors.transparent)),
-            belowBarData: BarAreaData(show: true,
-                gradient: LinearGradient(
-                    colors: [color.withOpacity(0.12), color.withOpacity(0.0)],
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter)),
-          )],
-          lineTouchData: LineTouchData(touchTooltipData: LineTouchTooltipData(
-            getTooltipColor: (_) => AppColors.surface,
-            tooltipBorder: const BorderSide(color: AppColors.border),
-            tooltipRoundedRadius: 10,
-            getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
-              '${s.y.toStringAsFixed(1)}$unit',
-              GoogleFonts.inter(color: color, fontSize: 12, fontWeight: FontWeight.w600),
-            )).toList(),
-          )),
-        ))),
-      ]),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          const SizedBox(width: 8),
+          const Expanded(child: Divider(height: 1)),
+        ],
+      ),
     );
   }
 }
