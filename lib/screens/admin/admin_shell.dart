@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../services/beacon_service.dart';
 import '../../services/smartspace_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../models/models.dart';
 import 'admin_dashboard_screen.dart';
 import 'admin_zones_screen.dart';
 import 'admin_history_screen.dart';
@@ -38,6 +39,13 @@ class _AdminShellState extends State<AdminShell> {
 
   @override
   Widget build(BuildContext context) {
+    final ss = context.watch<SmartSpaceProvider>();
+    final alertCount = ss.logs
+        .where((e) =>
+    e.type == LogEventType.alert ||
+        e.type == LogEventType.connectionLost)
+        .length;
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: IndexedStack(index: _index, children: _screens),
@@ -48,20 +56,24 @@ class _AdminShellState extends State<AdminShell> {
         child: BottomNavigationBar(
           currentIndex: _index,
           onTap: (i) => setState(() => _index = i),
-          items: const [
-            BottomNavigationBarItem(
+          items: [
+            const BottomNavigationBarItem(
               icon: Icon(Icons.dashboard_rounded),
               label: 'Dashboard',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.meeting_room_rounded),
               label: 'Zonas',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.history_rounded),
+              icon: _BadgeIcon(
+                icon: Icons.history_rounded,
+                count: alertCount,
+                active: _index == 2,
+              ),
               label: 'Histórico',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.settings_rounded),
               label: 'Definições',
             ),
@@ -77,6 +89,51 @@ class _AdminShellState extends State<AdminShell> {
               fontSize: 10, fontWeight: FontWeight.w600),
         ),
       ),
+    );
+  }
+}
+
+// ── Badge Icon ─────────────────────────────────────────────────────────────────
+
+class _BadgeIcon extends StatelessWidget {
+  final IconData icon;
+  final int count;
+  final bool active;
+
+  const _BadgeIcon({
+    required this.icon,
+    required this.count,
+    required this.active,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(icon, color: active ? AppTheme.accent : AppTheme.textDisabled),
+        if (count > 0)
+          Positioned(
+            top: -4,
+            right: -8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: AppTheme.error,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.surface, width: 1.5),
+              ),
+              child: Text(
+                count > 99 ? '99+' : '$count',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

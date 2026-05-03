@@ -4,13 +4,68 @@ import '../theme/app_theme.dart';
 enum ZoneStatus { free, occupied, unknown }
 
 enum LogEventType {
+  // Autenticação
+  userRegister,
+  userLogin,
+  userLogout,
+  // Zonas
   zoneEntry,
   zoneExit,
+  beaconDetected,
+  // Comandos
   manualCommand,
   automationTrigger,
+  // Sistema
   connectionLost,
   connectionRestored,
   alert,
+}
+
+enum LogCategory {
+  auth,
+  zones,
+  commands,
+  system,
+}
+
+extension LogEventTypeExtension on LogEventType {
+  LogCategory get category {
+    switch (this) {
+      case LogEventType.userRegister:
+      case LogEventType.userLogin:
+      case LogEventType.userLogout:
+        return LogCategory.auth;
+      case LogEventType.zoneEntry:
+      case LogEventType.zoneExit:
+      case LogEventType.beaconDetected:
+        return LogCategory.zones;
+      case LogEventType.manualCommand:
+      case LogEventType.automationTrigger:
+        return LogCategory.commands;
+      case LogEventType.connectionLost:
+      case LogEventType.connectionRestored:
+      case LogEventType.alert:
+        return LogCategory.system;
+    }
+  }
+
+  String get categoryLabel {
+    switch (category) {
+      case LogCategory.auth:     return 'Autenticação';
+      case LogCategory.zones:    return 'Zonas';
+      case LogCategory.commands: return 'Comandos';
+      case LogCategory.system:   return 'Sistema';
+    }
+  }
+
+  Color get categoryColor {
+    switch (category) {
+      case LogCategory.auth:     return const Color(0xFF8B5CF6);
+      case LogCategory.zones:    return AppTheme.success;
+      case LogCategory.commands: return AppTheme.accent;
+      case LogCategory.system:   return AppTheme.warning;
+    }
+  }
 }
 
 class Beacon {
@@ -231,6 +286,9 @@ class LogEvent {
   final LogEventType type;
   final String zoneId;
   final String message;
+  final String userName;
+  final String userRole;
+  final String uid;
   final DateTime timestamp;
 
   LogEvent({
@@ -238,13 +296,24 @@ class LogEvent {
     required this.type,
     required this.zoneId,
     required this.message,
+    this.userName = '',
+    this.userRole = 'user',
+    this.uid = '',
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 
+  bool get isAdmin => userRole == 'admin';
+
+  LogCategory get category => type.category;
+
   IconData get icon {
     switch (type) {
-      case LogEventType.zoneEntry:          return Icons.login_rounded;
-      case LogEventType.zoneExit:           return Icons.logout_rounded;
+      case LogEventType.userRegister:       return Icons.person_add_rounded;
+      case LogEventType.userLogin:          return Icons.login_rounded;
+      case LogEventType.userLogout:         return Icons.logout_rounded;
+      case LogEventType.zoneEntry:          return Icons.door_front_door_rounded;
+      case LogEventType.zoneExit:           return Icons.door_back_door_rounded;
+      case LogEventType.beaconDetected:     return Icons.bluetooth_searching_rounded;
       case LogEventType.manualCommand:      return Icons.touch_app_rounded;
       case LogEventType.automationTrigger:  return Icons.auto_fix_high_rounded;
       case LogEventType.connectionLost:     return Icons.wifi_off_rounded;
@@ -255,8 +324,12 @@ class LogEvent {
 
   Color get color {
     switch (type) {
+      case LogEventType.userRegister:       return const Color(0xFF8B5CF6);
+      case LogEventType.userLogin:          return AppTheme.success;
+      case LogEventType.userLogout:         return AppTheme.textSecondary;
       case LogEventType.zoneEntry:          return AppTheme.success;
       case LogEventType.zoneExit:           return AppTheme.textSecondary;
+      case LogEventType.beaconDetected:     return AppTheme.accent;
       case LogEventType.manualCommand:      return AppTheme.accent;
       case LogEventType.automationTrigger:  return const Color(0xFF7C3AED);
       case LogEventType.connectionLost:     return AppTheme.error;

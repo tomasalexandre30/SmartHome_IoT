@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import 'database_service.dart';
+import 'auth_service.dart';
 
 class SmartSpaceProvider extends ChangeNotifier {
   // ── State ──────────────────────────────────────────────────────────────
@@ -27,11 +28,13 @@ class SmartSpaceProvider extends ChangeNotifier {
   // ── Database ───────────────────────────────────────────────────────────
   DatabaseService? _db;
   String? _uid;
+  AppUser? _appUser;
   StreamSubscription? _zonesSub;
 
-  void attachDatabase(DatabaseService db, String uid) {
+  void attachDatabase(DatabaseService db, String uid, AppUser? appUser) {
     _db = db;
     _uid = uid;
+    _appUser = appUser;
     _listenZones();
     _listenConnection();
   }
@@ -99,8 +102,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     if (prev != null) {
       final prevZone = zoneById(prev);
       final newCount = (prevZone?.occupantCount ?? 1) - 1;
-      final newUsers = [...?prevZone?.presentUsers]
-        ..remove(_displayName);
+      final newUsers = [...?prevZone?.presentUsers]..remove(_displayName);
 
       _updateZone(prev, (z) => z.copyWith(
         status: newCount <= 0 ? ZoneStatus.free : ZoneStatus.occupied,
@@ -114,14 +116,14 @@ class SmartSpaceProvider extends ChangeNotifier {
         newCount.clamp(0, 99),
         newUsers,
       );
-
       _db?.updateUserZone(_uid!, null);
 
       _log(LogEvent(
         id: _uid_(),
         type: LogEventType.zoneExit,
         zoneId: prev,
-        message: 'Saiu da ${zoneById(prev)?.name ?? prev}',
+        message: '$_displayName saiu da ${zoneById(prev)?.name ?? prev}',
+        userName: _displayName,
       ));
     }
 
@@ -143,7 +145,8 @@ class SmartSpaceProvider extends ChangeNotifier {
         id: _uid_(),
         type: LogEventType.zoneEntry,
         zoneId: zoneId,
-        message: 'Entrou na ${zoneById(zoneId)?.name ?? zoneId}',
+        message: '$_displayName entrou na ${zoneById(zoneId)?.name ?? zoneId}',
+        userName: _displayName,
       ));
 
       _applyPreferences(zoneId);
@@ -152,7 +155,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  String get _displayName => _uid?.substring(0, 6) ?? 'Eu';
+  String get _displayName => _appUser?.displayName ?? _uid?.substring(0, 6) ?? 'Utilizador';
 
   void _updateZone(String id, Zone Function(Zone) fn) {
     _zones = _zones.map((z) => z.id == id ? fn(z) : z).toList();
@@ -169,7 +172,8 @@ class SmartSpaceProvider extends ChangeNotifier {
       id: _uid_(),
       type: LogEventType.manualCommand,
       zoneId: zoneId,
-      message: '${z.lightOn ? "Desligou" : "Ligou"} a luz na ${z.name}',
+      message: '$_displayName ${newState ? "ligou" : "desligou"} a luz na ${z.name}',
+      userName: _displayName,
     ));
     notifyListeners();
   }
@@ -192,7 +196,8 @@ class SmartSpaceProvider extends ChangeNotifier {
       id: _uid_(),
       type: LogEventType.manualCommand,
       zoneId: zoneId,
-      message: '${z.buzzerOn ? "Desligou" : "Ligou"} o buzzer na ${z.name}',
+      message: '$_displayName ${newState ? "ligou" : "desligou"} o buzzer na ${z.name}',
+      userName: _displayName,
     ));
     notifyListeners();
   }
@@ -240,7 +245,8 @@ class SmartSpaceProvider extends ChangeNotifier {
       id: _uid_(),
       type: LogEventType.automationTrigger,
       zoneId: zoneId,
-      message: 'Automação: preferências aplicadas na ${zoneById(zoneId)?.name ?? zoneId}',
+      message: 'Preferências de $_displayName aplicadas na ${zoneById(zoneId)?.name ?? zoneId}',
+      userName: _displayName,
     ));
   }
 
@@ -296,6 +302,7 @@ class SmartSpaceProvider extends ChangeNotifier {
       type: LogEventType.automationTrigger,
       zoneId: zoneId,
       message: 'Automação: ${rule.label}',
+      userName: 'Sistema',
     ));
     notifyListeners();
   }
@@ -309,6 +316,7 @@ class SmartSpaceProvider extends ChangeNotifier {
       type: v ? LogEventType.connectionRestored : LogEventType.connectionLost,
       zoneId: '',
       message: v ? 'Ligação restabelecida' : 'Ligação perdida — modo autónomo',
+      userName: 'Sistema',
     ));
     notifyListeners();
   }
@@ -317,6 +325,9 @@ class SmartSpaceProvider extends ChangeNotifier {
   void _log(LogEvent e) {
     _logs.add(e);
     if (_logs.length > 200) _logs.removeAt(0);
+    if (_db != null && _uid != null) {
+      _db!.saveLog(e, _uid!, _appUser?.role.name ?? 'user');
+    }
   }
 
   void addLog(LogEvent e) {

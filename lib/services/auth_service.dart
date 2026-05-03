@@ -69,17 +69,27 @@ class AuthService extends ChangeNotifier {
 
       final isAdminCode = adminCode.trim() == 'iot_2026';
       final role = isAdminCode ? 'admin' : 'user';
+      final name = displayName.trim().isEmpty
+          ? email.split('@').first
+          : displayName.trim();
 
       await _db.collection('users').doc(cred.user!.uid).set({
         'email': email.trim(),
-        'displayName': displayName.trim().isEmpty
-            ? email.split('@').first
-            : displayName.trim(),
+        'displayName': name,
         'role': role,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
       await loadUserProfile();
+
+      await _saveAuthLog(
+        uid: cred.user!.uid,
+        userName: name,
+        type: 'userRegister',
+        message: '$name registou-se como ${isAdminCode ? "administrador" : "utilizador"}',
+        role: role,
+      );
+
       return null;
     } on FirebaseAuthException catch (e) {
       return _errorMessage(e.code);
@@ -96,6 +106,15 @@ class AuthService extends ChangeNotifier {
         password: password.trim(),
       );
       await loadUserProfile();
+
+      await _saveAuthLog(
+        uid: _auth.currentUser!.uid,
+        userName: _appUser?.displayName ?? email.split('@').first,
+        type: 'userLogin',
+        message: '${_appUser?.displayName ?? email.split('@').first} iniciou sessão',
+        role: _appUser?.role.name ?? 'user',
+      );
+
       return null;
     } on FirebaseAuthException catch (e) {
       return _errorMessage(e.code);
@@ -104,9 +123,44 @@ class AuthService extends ChangeNotifier {
 
   // ── Logout ─────────────────────────────────────────────────────────────
   Future<void> logout() async {
+    if (_auth.currentUser != null && _appUser != null) {
+      await _saveAuthLog(
+        uid: _auth.currentUser!.uid,
+        userName: _appUser!.displayName,
+        type: 'userLogout',
+        message: '${_appUser!.displayName} terminou sessão',
+        role: _appUser!.role.name,
+      );
+    }
+
     await _auth.signOut();
     _appUser = null;
     notifyListeners();
+  }
+
+  // ── Auth Log ───────────────────────────────────────────────────────────
+  Future<void> _saveAuthLog({
+    required String uid,
+    required String userName,
+    required String type,
+    required String message,
+    required String role,
+  }) async {
+    try {
+      await _db.collection('logs').add({
+        'id': '${DateTime.now().millisecondsSinceEpoch}_auth',
+        'type': type,
+        'zoneId': '',
+        'message': message,
+        'userName': userName,
+        'userRole': role,
+        'category': 'auth',
+        'timestamp': FieldValue.serverTimestamp(),
+        'uid': uid,
+      });
+    } catch (e) {
+      debugPrint('[AUTH] Erro ao guardar log: $e');
+    }
   }
 
   // ── Erros ──────────────────────────────────────────────────────────────

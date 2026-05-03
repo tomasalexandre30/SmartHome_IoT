@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 
@@ -7,16 +8,18 @@ class DatabaseService extends ChangeNotifier {
     app: FirebaseDatabase.instance.app,
     databaseURL: 'https://smartspaceiot-default-rtdb.europe-west1.firebasedatabase.app',
   );
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool _connected = false;
   bool get connected => _connected;
 
-  // ── Referências ────────────────────────────────────────────────────────
+  // ── Referências Realtime Database ──────────────────────────────────────
   DatabaseReference _zonesRef() => _db.ref('smartspace/zones');
   DatabaseReference _zoneRef(String id) => _db.ref('smartspace/zones/$id');
   DatabaseReference _userRef(String uid) => _db.ref('smartspace/users/$uid');
-  DatabaseReference _commandRef(String zoneId) =>
-      _db.ref('smartspace/commands/$zoneId');
+
+  // ── Referências Firestore ──────────────────────────────────────────────
+  CollectionReference _logsRef() => _firestore.collection('logs');
 
   // ── Inicialização ──────────────────────────────────────────────────────
   Future<void> initialize(String uid) async {
@@ -33,14 +36,16 @@ class DatabaseService extends ChangeNotifier {
   }
 
   // ── Zonas ──────────────────────────────────────────────────────────────
-
   Future<void> _initializeZones() async {
-    final snapshot = await _zonesRef().get();
-    if (!snapshot.exists) {
-      // Cria as zonas com valores default se não existirem
-      for (final zone in DefaultData.zones()) {
-        await _zoneRef(zone.id).set(_zoneToMap(zone));
+    try {
+      final snapshot = await _zonesRef().get();
+      if (!snapshot.exists) {
+        for (final zone in DefaultData.zones()) {
+          await _zoneRef(zone.id).set(_zoneToMap(zone));
+        }
       }
+    } catch (e) {
+      debugPrint('[DB] Erro ao inicializar zonas: $e');
     }
   }
 
@@ -59,7 +64,6 @@ class DatabaseService extends ChangeNotifier {
     'lastUpdated': ServerValue.timestamp,
   };
 
-  // ── Stream de zonas em tempo real ──────────────────────────────────────
   Stream<List<ZoneUpdate>> zonesStream() {
     return _zonesRef().onValue.map((event) {
       if (!event.snapshot.exists) return [];
@@ -71,7 +75,6 @@ class DatabaseService extends ChangeNotifier {
     });
   }
 
-  // ── Atualizar estado da zona ───────────────────────────────────────────
   Future<void> updateZoneLight(String zoneId, bool on, double intensity) async {
     try {
       await _zoneRef(zoneId).update({
@@ -123,7 +126,6 @@ class DatabaseService extends ChangeNotifier {
       if (temperature != null) updates['temperature'] = temperature;
       if (humidity != null) updates['humidity'] = humidity;
       if (motionDetected != null) updates['motionDetected'] = motionDetected;
-
       await _zoneRef(zoneId).update(updates);
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar sensores: $e');
@@ -137,8 +139,6 @@ class DatabaseService extends ChangeNotifier {
         'online': true,
         'lastSeen': ServerValue.timestamp,
       });
-
-      // Quando desliga, marca como offline
       await _userRef(uid).onDisconnect().update({
         'online': false,
         'lastSeen': ServerValue.timestamp,
@@ -160,7 +160,6 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ── Stream de utilizadores online (admin) ──────────────────────────────
   Stream<List<OnlineUser>> onlineUsersStream() {
     return _db.ref('smartspace/users').onValue.map((event) {
       if (!event.snapshot.exists) return [];
@@ -179,15 +178,83 @@ class DatabaseService extends ChangeNotifier {
     });
   }
 
-  // ── Comandos on-demand ─────────────────────────────────────────────────
-  Future<void> sendCommand(String zoneId, Map<String, dynamic> command) async {
+  // ── Logs no Firestore ──────────────────────────────────────────────────
+
+  Future<void> saveLog(LogEvent event, String uid, String role) async {
     try {
-      await _commandRef(zoneId).update({
-        ...command,
-        'timestamp': ServerValue.timestamp,
+      await _logsRef().add({
+        'id': event.id,
+        'type': event.type.name,
+        'zoneId': event.zoneId,
+        'message': event.message,
+        'userName': event.userName,
+        'userRole': role,
+        'category': event.category.name,
+        'timestamp': Timestamp.fromDate(event.timestamp),
+        'uid': uid,
       });
     } catch (e) {
-      debugPrint('[DB] Erro ao enviar comando: $e');
+      debugPrint('[DB] Erro ao guardar log: $e');
+    }
+  }
+
+  // Stream de logs do utilizador atual
+  Stream<List<LogEvent>> userLogsStream(String uid) {
+    return _logsRef()
+        .where('uid', isEqualTo: uid)
+        .orderBy('timestamp', descending: true)
+        .limit(100)
+        .snapshots()
+        .map((snap) => snap.docs.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return LogEvent(
+        id: data['id'] as String? ?? doc.id,
+        type: _parseLogType(data['type'] as String? ?? ''),
+        zoneId: data['zoneId'] as String? ?? '',
+        message: data['message'] as String? ?? '',
+        userName: data['userName'] as String? ?? '',
+        userRole: data['userRole'] as String? ?? 'user',
+        uid: data['uid'] as String? ?? '',
+        timestamp: (data['timestamp'] as Timestamp).toDate(),
+      );
+    }).toList());
+  }
+
+  // Stream de todos os logs (só admin)
+  Stream<List<LogEvent>> allLogsStream() {
+    return _logsRef()
+        .orderBy('timestamp', descending: true)
+        .limit(200)
+        .snapshots()
+        .map((snap) => snap.docs.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return LogEvent(
+        id: data['id'] as String? ?? doc.id,
+        type: _parseLogType(data['type'] as String? ?? ''),
+        zoneId: data['zoneId'] as String? ?? '',
+        message: data['message'] as String? ?? '',
+        userName: data['userName'] as String? ?? '',
+        userRole: data['userRole'] as String? ?? 'user', // ← estava a faltar
+        uid: data['uid'] as String? ?? '',               // ← estava a faltar
+        timestamp: (data['timestamp'] as Timestamp).toDate(),
+      );
+    }).toList());
+  }
+
+  LogEventType _parseLogType(String type) {
+    switch (type) {
+      case 'userRegister':       return LogEventType.userRegister;
+      case 'userLogin':          return LogEventType.userLogin;
+      case 'userLogout':         return LogEventType.userLogout;
+      case 'zoneEntry':          return LogEventType.zoneEntry;
+      case 'zoneExit':           return LogEventType.zoneExit;
+      case 'beaconDetected':     return LogEventType.beaconDetected;
+      case 'manualCommand':      return LogEventType.manualCommand;
+      case 'automationTrigger':  return LogEventType.automationTrigger;
+      case 'connectionLost':     return LogEventType.connectionLost;
+      case 'connectionRestored': return LogEventType.connectionRestored;
+      case 'alert':              return LogEventType.alert;
+      default:                   return LogEventType.alert;
     }
   }
 

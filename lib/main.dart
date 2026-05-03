@@ -101,13 +101,12 @@ class _RoleGateState extends State<_RoleGate> {
     final auth = context.read<AuthService>();
     await auth.loadUserProfile();
 
-    // Liga o DatabaseService ao SmartSpaceProvider
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       final db = context.read<DatabaseService>();
       final ss = context.read<SmartSpaceProvider>();
       await db.initialize(uid);
-      ss.attachDatabase(db, uid);
+      ss.attachDatabase(db, uid, auth.appUser);
     }
 
     if (mounted) setState(() => _loading = false);

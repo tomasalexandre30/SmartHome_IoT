@@ -5,7 +5,7 @@ import '../../services/smartspace_provider.dart';
 import '../../theme/app_theme.dart';
 import 'user_dashboard_screen.dart';
 import 'user_control_screen.dart';
-import 'user_history_screen.dart';
+import 'user_preferences_screen.dart';
 import '../settings_screen.dart';
 
 class UserShell extends StatefulWidget {
@@ -32,7 +32,7 @@ class _UserShellState extends State<UserShell> {
   static const _screens = [
     UserDashboardScreen(),
     UserControlScreen(),
-    UserHistoryScreen(),
+    UserPreferencesScreen(),
     SettingsScreen(),
   ];
 
@@ -42,7 +42,7 @@ class _UserShellState extends State<UserShell> {
     BottomNavigationBarItem(
         icon: Icon(Icons.tune_rounded), label: 'Controlo'),
     BottomNavigationBarItem(
-        icon: Icon(Icons.history_rounded), label: 'Atividade'),
+        icon: Icon(Icons.star_rounded), label: 'Preferências'),
     BottomNavigationBarItem(
         icon: Icon(Icons.settings_rounded), label: 'Definições'),
   ];
@@ -54,8 +54,7 @@ class _UserShellState extends State<UserShell> {
       body: IndexedStack(index: _index, children: _screens),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
-          border:
-          Border(top: BorderSide(color: AppTheme.border, width: 1)),
+          border: Border(top: BorderSide(color: AppTheme.border, width: 1)),
         ),
         child: BottomNavigationBar(
           currentIndex: _index,
