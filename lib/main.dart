@@ -9,6 +9,7 @@ import 'models/models.dart';
 import 'services/beacon_service.dart';
 import 'services/smartspace_provider.dart';
 import 'services/auth_service.dart';
+import 'services/database_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/user/user_shell.dart';
 import 'screens/admin/admin_shell.dart';
@@ -41,6 +42,7 @@ class SmartSpaceApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider(create: (_) => DatabaseService()),
         ChangeNotifierProvider(create: (_) => SmartSpaceProvider()),
         ChangeNotifierProvider(create: (_) {
           final ble = BeaconService();
@@ -74,9 +76,7 @@ class _AuthGate extends StatelessWidget {
             ),
           );
         }
-
         if (!snapshot.hasData) return const LoginScreen();
-
         return _RoleGate();
       },
     );
@@ -98,7 +98,18 @@ class _RoleGateState extends State<_RoleGate> {
   }
 
   Future<void> _load() async {
-    await context.read<AuthService>().loadUserProfile();
+    final auth = context.read<AuthService>();
+    await auth.loadUserProfile();
+
+    // Liga o DatabaseService ao SmartSpaceProvider
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final db = context.read<DatabaseService>();
+      final ss = context.read<SmartSpaceProvider>();
+      await db.initialize(uid);
+      ss.attachDatabase(db, uid);
+    }
+
     if (mounted) setState(() => _loading = false);
   }
 
@@ -112,7 +123,6 @@ class _RoleGateState extends State<_RoleGate> {
         ),
       );
     }
-
     final auth = context.read<AuthService>();
     return auth.isAdmin ? const AdminShell() : const UserShell();
   }
