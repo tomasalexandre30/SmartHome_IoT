@@ -9,11 +9,9 @@ import 'models/models.dart';
 import 'services/beacon_service.dart';
 import 'services/smartspace_provider.dart';
 import 'services/auth_service.dart';
-import 'screens/dashboard_screen.dart';
-import 'screens/control_screen.dart';
-import 'screens/history_screen.dart';
-import 'screens/settings_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/user/user_shell.dart';
+import 'screens/admin/admin_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,7 +58,6 @@ class SmartSpaceApp extends StatelessWidget {
   }
 }
 
-// Decide automaticamente se mostra Login ou App
 class _AuthGate extends StatelessWidget {
   const _AuthGate();
 
@@ -78,73 +75,45 @@ class _AuthGate extends StatelessWidget {
           );
         }
 
-        if (snapshot.hasData) {
-          return const _Root();
-        }
+        if (!snapshot.hasData) return const LoginScreen();
 
-        return const LoginScreen();
+        return _RoleGate();
       },
     );
   }
 }
 
-class _Root extends StatefulWidget {
-  const _Root();
-
+class _RoleGate extends StatefulWidget {
   @override
-  State<_Root> createState() => _RootState();
+  State<_RoleGate> createState() => _RoleGateState();
 }
 
-class _RootState extends State<_Root> {
-  int _index = 0;
+class _RoleGateState extends State<_RoleGate> {
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ble = context.read<BeaconService>();
-      final ss  = context.read<SmartSpaceProvider>();
-      ble.addListener(() => ss.updateZoneFromBeacon(ble.currentZoneId));
-      ble.startScanning();
-    });
+    _load();
   }
 
-  static const _screens = [
-    DashboardScreen(),
-    ControlScreen(),
-    HistoryScreen(),
-    SettingsScreen(),
-  ];
-
-  static const _navItems = [
-    BottomNavigationBarItem(icon: Icon(Icons.home_rounded),     label: 'Início'),
-    BottomNavigationBarItem(icon: Icon(Icons.tune_rounded),     label: 'Controlo'),
-    BottomNavigationBarItem(icon: Icon(Icons.history_rounded),  label: 'Histórico'),
-    BottomNavigationBarItem(icon: Icon(Icons.settings_rounded), label: 'Definições'),
-  ];
+  Future<void> _load() async {
+    await context.read<AuthService>().loadUserProfile();
+    if (mounted) setState(() => _loading = false);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: IndexedStack(index: _index, children: _screens),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: AppTheme.border, width: 1)),
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: AppTheme.background,
+        body: Center(
+          child: CircularProgressIndicator(color: AppTheme.accent),
         ),
-        child: BottomNavigationBar(
-          currentIndex: _index,
-          onTap: (i) => setState(() => _index = i),
-          items: _navItems,
-          backgroundColor: AppTheme.surface,
-          selectedItemColor: AppTheme.accent,
-          unselectedItemColor: AppTheme.textDisabled,
-          type: BottomNavigationBarType.fixed,
-          elevation: 0,
-          selectedLabelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
-          unselectedLabelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
-        ),
-      ),
-    );
+      );
+    }
+
+    final auth = context.read<AuthService>();
+    return auth.isAdmin ? const AdminShell() : const UserShell();
   }
 }
