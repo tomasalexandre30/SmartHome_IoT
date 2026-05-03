@@ -89,8 +89,16 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 ),
               ],
               bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(1),
-                child: ConnectionBanner(connected: ss.isConnected),
+                preferredSize: const Size.fromHeight(40),
+                child: Consumer<SmartSpaceProvider>(
+                  builder: (context, ss, _) => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ConnectionBanner(connected: ss.isConnected),
+                      ReconnectedBanner(connected: ss.isConnected),
+                    ],
+                  ),
+                ),
               ),
             ),
 

@@ -320,15 +320,137 @@ class ConnectionBanner extends StatelessWidget {
     if (connected) return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      color: AppTheme.error.withOpacity(0.15),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+      color: AppTheme.error.withOpacity(0.12),
+      child: Row(
         children: [
-          Icon(Icons.wifi_off_rounded, color: AppTheme.error, size: 14),
-          SizedBox(width: 8),
-          Text('Modo autónomo — sem ligação ao servidor',
-              style: TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.w500)),
+          Container(
+            width: 28, height: 28,
+            decoration: BoxDecoration(
+              color: AppTheme.error.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.wifi_off_rounded,
+                color: AppTheme.error, size: 14),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Modo autónomo',
+                  style: TextStyle(
+                      color: AppTheme.error,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  'Sem ligação ao servidor — comandos guardados localmente',
+                  style: TextStyle(color: AppTheme.error, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppTheme.error.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'OFFLINE',
+              style: TextStyle(
+                  color: AppTheme.error,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── ReconnectedBanner ─────────────────────────────────────────────────────────
+
+class ReconnectedBanner extends StatefulWidget {
+  final bool connected;
+  const ReconnectedBanner({super.key, required this.connected});
+
+  @override
+  State<ReconnectedBanner> createState() => _ReconnectedBannerState();
+}
+
+class _ReconnectedBannerState extends State<ReconnectedBanner> {
+  bool _show = false;
+  bool _wasDisconnected = false;
+
+  @override
+  void didUpdateWidget(ReconnectedBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.connected && widget.connected && _wasDisconnected) {
+      setState(() => _show = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _show = false);
+      });
+    }
+    if (!widget.connected) _wasDisconnected = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_show) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+      color: AppTheme.success.withOpacity(0.12),
+      child: Row(
+        children: [
+          Container(
+            width: 28, height: 28,
+            decoration: BoxDecoration(
+              color: AppTheme.success.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.wifi_rounded,
+                color: AppTheme.success, size: 14),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Ligação restabelecida',
+                  style: TextStyle(
+                      color: AppTheme.success,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  'A sincronizar comandos pendentes...',
+                  style: TextStyle(color: AppTheme.success, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppTheme.success.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'ONLINE',
+              style: TextStyle(
+                  color: AppTheme.success,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5),
+            ),
+          ),
         ],
       ),
     );

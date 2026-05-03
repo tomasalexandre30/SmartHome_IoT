@@ -76,7 +76,9 @@ class SettingsScreen extends StatelessWidget {
                 _ToggleRow(
                   icon: Icons.cloud_rounded,
                   label: 'Ligação ao servidor',
-                  subtitle: 'Firebase Realtime Database',
+                  subtitle: ss.isConnected
+                      ? 'Firebase — online'
+                      : 'Firebase — modo autónomo ativo',
                   value: ss.isConnected,
                   onChanged: (v) => ss.setConnected(v),
                 ),

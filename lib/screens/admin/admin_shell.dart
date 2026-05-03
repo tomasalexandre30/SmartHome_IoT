@@ -18,6 +18,7 @@ class AdminShell extends StatefulWidget {
 
 class _AdminShellState extends State<AdminShell> {
   int _index = 0;
+  int _lastSeenLogCount = 0;
 
   @override
   void initState() {
@@ -27,24 +28,32 @@ class _AdminShellState extends State<AdminShell> {
       final ss  = context.read<SmartSpaceProvider>();
       ble.addListener(() => ss.updateZoneFromBeacon(ble.currentZoneId));
       ble.startScanning();
+
+      // Inicializa o contador com os logs atuais
+      _lastSeenLogCount = _alertCount(ss.logs);
     });
   }
 
-  static const _screens = [
-    AdminDashboardScreen(),
-    AdminZonesScreen(),
+  static final _screens = [
+    const AdminDashboardScreen(),
+    const AdminZonesScreen(),
     AdminHistoryScreen(),
-    SettingsScreen(),
+    const SettingsScreen(),
   ];
+
+  int _alertCount(List<LogEvent> logs) => logs
+      .where((e) =>
+  e.type == LogEventType.alert ||
+      e.type == LogEventType.connectionLost)
+      .length;
 
   @override
   Widget build(BuildContext context) {
     final ss = context.watch<SmartSpaceProvider>();
-    final alertCount = ss.logs
-        .where((e) =>
-    e.type == LogEventType.alert ||
-        e.type == LogEventType.connectionLost)
-        .length;
+    final totalAlerts = _alertCount(ss.logs);
+
+    // Quantos alertas novos desde a última vez que abriu o Histórico
+    final unseenAlerts = (totalAlerts - _lastSeenLogCount).clamp(0, 99);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -55,7 +64,13 @@ class _AdminShellState extends State<AdminShell> {
         ),
         child: BottomNavigationBar(
           currentIndex: _index,
-          onTap: (i) => setState(() => _index = i),
+          onTap: (i) {
+            setState(() => _index = i);
+            // Quando abre o Histórico, marca todos como vistos
+            if (i == 2) {
+              setState(() => _lastSeenLogCount = totalAlerts);
+            }
+          },
           items: [
             const BottomNavigationBarItem(
               icon: Icon(Icons.dashboard_rounded),
@@ -68,7 +83,7 @@ class _AdminShellState extends State<AdminShell> {
             BottomNavigationBarItem(
               icon: _BadgeIcon(
                 icon: Icons.history_rounded,
-                count: alertCount,
+                count: unseenAlerts,
                 active: _index == 2,
               ),
               label: 'Histórico',
