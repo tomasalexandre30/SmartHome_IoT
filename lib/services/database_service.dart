@@ -138,7 +138,9 @@ class DatabaseService extends ChangeNotifier {
       await _userRef(uid).update({
         'online': true,
         'lastSeen': ServerValue.timestamp,
+        'currentZoneId': null,
       });
+      // onDisconnect para casos de crash ou perda de rede
       await _userRef(uid).onDisconnect().update({
         'online': false,
         'lastSeen': ServerValue.timestamp,
@@ -161,20 +163,45 @@ class DatabaseService extends ChangeNotifier {
   }
 
   Stream<List<OnlineUser>> onlineUsersStream() {
-    return _db.ref('smartspace/users').onValue.map((event) {
+    return _db.ref('smartspace/users').onValue.asyncMap((event) async {
       if (!event.snapshot.exists) return [];
       final data = event.snapshot.value as Map<dynamic, dynamic>;
-      return data.entries
-          .map((e) {
+
+      final onlineUids = data.entries
+          .where((e) {
         final userData = Map<String, dynamic>.from(e.value as Map);
-        return OnlineUser(
-          uid: e.key as String,
-          currentZoneId: userData['currentZoneId'] as String?,
-          online: userData['online'] as bool? ?? false,
-        );
+        return userData['online'] as bool? ?? false;
       })
-          .where((u) => u.online)
+          .map((e) => e.key as String)
           .toList();
+
+      if (onlineUids.isEmpty) return [];
+
+      // Vai buscar perfis do Firestore
+      final List<OnlineUser> users = [];
+      for (final uid in onlineUids) {
+        final userData = Map<String, dynamic>.from(data[uid] as Map);
+        try {
+          final doc = await _firestore.collection('users').doc(uid).get();
+          final name = doc.data()?['displayName'] as String? ?? uid.substring(0, 6);
+          final role = doc.data()?['role'] as String? ?? 'user';
+          users.add(OnlineUser(
+            uid: uid,
+            currentZoneId: userData['currentZoneId'] as String?,
+            online: true,
+            displayName: name,
+            role: role,
+          ));
+        } catch (_) {
+          users.add(OnlineUser(
+            uid: uid,
+            currentZoneId: userData['currentZoneId'] as String?,
+            online: true,
+            displayName: uid.substring(0, 6),
+          ));
+        }
+      }
+      return users;
     });
   }
 
@@ -198,7 +225,6 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // Stream de logs do utilizador atual
   Stream<List<LogEvent>> userLogsStream(String uid) {
     return _logsRef()
         .where('uid', isEqualTo: uid)
@@ -220,7 +246,6 @@ class DatabaseService extends ChangeNotifier {
     }).toList());
   }
 
-  // Stream de todos os logs (só admin)
   Stream<List<LogEvent>> allLogsStream() {
     return _logsRef()
         .orderBy('timestamp', descending: true)
@@ -234,8 +259,8 @@ class DatabaseService extends ChangeNotifier {
         zoneId: data['zoneId'] as String? ?? '',
         message: data['message'] as String? ?? '',
         userName: data['userName'] as String? ?? '',
-        userRole: data['userRole'] as String? ?? 'user', // ← estava a faltar
-        uid: data['uid'] as String? ?? '',               // ← estava a faltar
+        userRole: data['userRole'] as String? ?? 'user',
+        uid: data['uid'] as String? ?? '',
         timestamp: (data['timestamp'] as Timestamp).toDate(),
       );
     }).toList());
@@ -255,6 +280,51 @@ class DatabaseService extends ChangeNotifier {
       case 'connectionRestored': return LogEventType.connectionRestored;
       case 'alert':              return LogEventType.alert;
       default:                   return LogEventType.alert;
+    }
+  }
+
+  // ── Preferências no Firestore ──────────────────────────────────────────
+
+  Future<void> savePreferences(String uid, UserPreferences prefs) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('preferences')
+          .doc(prefs.zoneId)
+          .set(prefs.toJson());
+    } catch (e) {
+      debugPrint('[DB] Erro ao guardar preferências: $e');
+    }
+  }
+
+  Future<Map<String, UserPreferences>> loadPreferences(String uid) async {
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('preferences')
+          .get();
+
+      return {
+        for (final doc in snap.docs)
+          doc.id: UserPreferences.fromJson(doc.data())
+      };
+    } catch (e) {
+      debugPrint('[DB] Erro ao carregar preferências: $e');
+      return {};
+    }
+  }
+
+  Future<void> updateUserPresence(String uid, bool online) async {
+    try {
+      await _userRef(uid).update({
+        'online': online,
+        'lastSeen': ServerValue.timestamp,
+        if (!online) 'currentZoneId': null,
+      });
+    } catch (e) {
+      debugPrint('[DB] Erro ao atualizar presença: $e');
     }
   }
 
@@ -284,5 +354,17 @@ class OnlineUser {
   final String uid;
   final String? currentZoneId;
   final bool online;
-  OnlineUser({required this.uid, this.currentZoneId, required this.online});
+  final String displayName;
+  final String role;
+
+  OnlineUser({
+    required this.uid,
+    this.currentZoneId,
+    required this.online,
+    this.displayName = '',
+    this.role = 'user',
+  });
+
+  bool get isAdmin => role == 'admin';
 }
+

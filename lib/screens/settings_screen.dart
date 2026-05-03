@@ -432,6 +432,32 @@ class _ProfileSheet extends StatelessWidget {
               ),
             ),
           ),
+
+          const SizedBox(height: 12),
+
+          // Botão apagar conta
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: () => _confirmDeleteAccount(context),
+              icon: const Icon(Icons.delete_forever_rounded,
+                  color: AppTheme.textMuted, size: 18),
+              label: const Text(
+                'Apagar conta',
+                style: TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppTheme.border),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -462,8 +488,8 @@ class _ProfileSheet extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context); // fecha o dialog
-              Navigator.pop(context); // fecha o bottom sheet
+              Navigator.pop(context);
+              Navigator.pop(context);
               auth.logout();
             },
             style: ElevatedButton.styleFrom(
@@ -476,6 +502,98 @@ class _ProfileSheet extends StatelessWidget {
             child: const Text('Sair'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _confirmDeleteAccount(BuildContext context) {
+    final passwordCtrl = TextEditingController();
+    bool obscure = true;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppTheme.surfaceCard,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.delete_forever_rounded, color: AppTheme.error, size: 20),
+              SizedBox(width: 10),
+              Text('Apagar conta?',
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Esta ação é irreversível. Todos os teus dados serão apagados permanentemente.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Confirma a tua password:',
+                style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: passwordCtrl,
+                obscureText: obscure,
+                style: const TextStyle(color: AppTheme.textPrimary),
+                decoration: InputDecoration(
+                  hintText: 'Password',
+                  hintStyle: const TextStyle(color: AppTheme.textMuted),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      color: AppTheme.textMuted, size: 18,
+                    ),
+                    onPressed: () => setDialogState(() => obscure = !obscure),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (passwordCtrl.text.isEmpty) return;
+                Navigator.pop(dialogContext);
+                Navigator.pop(context); // fecha sheet
+
+                final error = await auth.deleteAccount(password: passwordCtrl.text);
+                if (error != null && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(error),
+                      backgroundColor: AppTheme.error,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.error,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                elevation: 0,
+              ),
+              child: const Text('Apagar'),
+            ),
+          ],
+        ),
       ),
     );
   }

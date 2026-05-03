@@ -26,6 +26,7 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   final Map<String, UserPreferences> _preferences = {};
   final List<Function()> _pendingCommands = [];
+  Timer? _prefsLogTimer;
 
   // ── Database ───────────────────────────────────────────────────────────
   DatabaseService? _db;
@@ -39,6 +40,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     _appUser = appUser;
     _listenZones();
     _listenConnection();
+    _loadPreferences();
   }
 
   void _listenZones() {
@@ -57,6 +59,18 @@ class SmartSpaceProvider extends ChangeNotifier {
     _db!.addListener(() {
       setConnected(_db!.connected);
     });
+  }
+
+  Future<void> _loadPreferences() async {
+    if (_db == null || _uid == null) return;
+    try {
+      final prefs = await _db!.loadPreferences(_uid!);
+      _preferences.addAll(prefs);
+      notifyListeners();
+      debugPrint('[SS] Preferências carregadas: ${prefs.length} zonas');
+    } catch (e) {
+      debugPrint('[SS] Erro ao carregar preferências: $e');
+    }
   }
 
   void _applyZoneUpdate(ZoneUpdate update) {
@@ -290,6 +304,29 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   void updatePreferences(UserPreferences prefs) {
     _preferences[prefs.zoneId] = prefs;
+    if (_db != null && _uid != null) {
+      _db!.savePreferences(_uid!, prefs);
+    }
+
+    // Debounce — só regista log 1 segundo depois de parar de mexer
+    _prefsLogTimer?.cancel();
+    _prefsLogTimer = Timer(const Duration(seconds: 1), () {
+      _log(LogEvent(
+        id: _uid_(),
+        type: LogEventType.manualCommand,
+        zoneId: prefs.zoneId,
+        message: '$_displayName atualizou preferências na '
+            '${zoneById(prefs.zoneId)?.name ?? prefs.zoneId} '
+            '(luz: ${(prefs.lightIntensity * 100).toInt()}%, '
+            'temp: ${prefs.temperatureTarget.toStringAsFixed(0)}°C'
+            '${prefs.doNotDisturb ? ", DND ativo" : ""})',
+        userName: _displayName,
+        userRole: _appUser?.role.name ?? 'user',
+        uid: _uid ?? '',
+      ));
+      notifyListeners();
+    });
+
     notifyListeners();
   }
 
@@ -359,7 +396,8 @@ class SmartSpaceProvider extends ChangeNotifier {
         if (_isConnected) {
           _db?.updateZoneLight(zoneId, true, 1.0);
         } else {
-          _pendingCommands.add(() => _db?.updateZoneLight(zoneId, true, 1.0));
+          _pendingCommands
+              .add(() => _db?.updateZoneLight(zoneId, true, 1.0));
         }
         break;
       case 'light_off':
@@ -367,7 +405,8 @@ class SmartSpaceProvider extends ChangeNotifier {
         if (_isConnected) {
           _db?.updateZoneLight(zoneId, false, 0.0);
         } else {
-          _pendingCommands.add(() => _db?.updateZoneLight(zoneId, false, 0.0));
+          _pendingCommands
+              .add(() => _db?.updateZoneLight(zoneId, false, 0.0));
         }
         break;
       case 'buzzer':
@@ -397,7 +436,8 @@ class SmartSpaceProvider extends ChangeNotifier {
     _isConnected = v;
 
     if (v && _pendingCommands.isNotEmpty) {
-      debugPrint('[SS] Sincronizando ${_pendingCommands.length} comandos pendentes...');
+      debugPrint(
+          '[SS] Sincronizando ${_pendingCommands.length} comandos pendentes...');
       for (final cmd in _pendingCommands) {
         cmd();
       }
@@ -435,8 +475,8 @@ class SmartSpaceProvider extends ChangeNotifier {
     if (_db != null && _uid != null && _isConnected) {
       _db!.saveLog(enriched, _uid!, enriched.userRole);
     } else if (!_isConnected) {
-      // Guarda log para persistir quando voltar a ligar
-      _pendingCommands.add(() => _db!.saveLog(enriched, _uid!, enriched.userRole));
+      _pendingCommands
+          .add(() => _db!.saveLog(enriched, _uid!, enriched.userRole));
     }
   }
 
@@ -448,6 +488,7 @@ class SmartSpaceProvider extends ChangeNotifier {
   // ── Cleanup ────────────────────────────────────────────────────────────
   @override
   void dispose() {
+    _prefsLogTimer?.cancel();
     _zonesSub?.cancel();
     super.dispose();
   }

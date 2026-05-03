@@ -6,6 +6,7 @@ import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/widgets.dart';
 import '../../models/models.dart';
+import '../../services/database_service.dart';
 import 'admin_zone_detail_screen.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
@@ -110,7 +111,13 @@ class AdminDashboardScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Todas as zonas ───────────────────────────────────
+                  // ── Utilizadores online ──────────────────────────────────────────────
+                  const SectionHeader(title: 'Utilizadores Online'),
+                  _OnlineUsersCard(zones: ss.zones),
+
+                  const SizedBox(height: 20),
+
+                  // ── Todas as zonas ───────────────────────────────────────────────────
                   const SectionHeader(title: 'Todas as Zonas'),
                   ...ss.zones.map((z) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -591,5 +598,257 @@ class _QuickToggle extends StatelessWidget {
           color: active ? color : AppTheme.textMuted, size: 18),
     ),
   );
+}
+
+class _OnlineUsersCard extends StatelessWidget {
+  final List<Zone> zones;
+  const _OnlineUsersCard({required this.zones});
+
+  @override
+  Widget build(BuildContext context) {
+    final db = context.read<DatabaseService>();
+
+    return StreamBuilder<List<OnlineUser>>(
+      stream: db.onlineUsersStream(),
+      builder: (context, snapshot) {
+        final users = snapshot.data ?? [];
+
+        if (users.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(16),
+            decoration: SS.card(),
+            child: const Row(
+              children: [
+                Icon(Icons.people_outline_rounded,
+                    color: AppTheme.textMuted, size: 20),
+                SizedBox(width: 12),
+                Text('Nenhum utilizador online',
+                    style: TextStyle(
+                        color: AppTheme.textMuted, fontSize: 13)),
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          decoration: SS.glowCard(glowColor: AppTheme.success),
+          child: Column(
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.success.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.people_rounded,
+                          color: AppTheme.success, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      '${users.length} utilizador${users.length != 1 ? "es" : ""} online',
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.success.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6, height: 6,
+                            decoration: BoxDecoration(
+                              color: AppTheme.success,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppTheme.success.withOpacity(0.5),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Text('LIVE',
+                              style: TextStyle(
+                                  color: AppTheme.success,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.5)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+
+              // Lista de utilizadores
+              ...users.map((u) {
+                final zone = u.currentZoneId != null
+                    ? zones.where((z) => z.id == u.currentZoneId).firstOrNull
+                    : null;
+                final initial = u.displayName.isNotEmpty
+                    ? u.displayName[0].toUpperCase()
+                    : u.uid[0].toUpperCase();
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: u != users.last
+                            ? AppTheme.border
+                            : Colors.transparent,
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      // Avatar
+                      Container(
+                        width: 38, height: 38,
+                        decoration: BoxDecoration(
+                          color: (zone?.color ?? AppTheme.accent).withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: (zone?.color ?? AppTheme.accent).withOpacity(0.3),
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            initial,
+                            style: TextStyle(
+                              color: zone?.color ?? AppTheme.accent,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+
+                      // Info
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  u.displayName.isNotEmpty
+                                      ? u.displayName
+                                      : u.uid.substring(0, 6),
+                                  style: const TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: u.isAdmin
+                                        ? AppTheme.accent.withOpacity(0.1)
+                                        : AppTheme.success.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    u.isAdmin ? '⚡ Admin' : '👤 User',
+                                    style: TextStyle(
+                                      color: u.isAdmin
+                                          ? AppTheme.accent
+                                          : AppTheme.success,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              zone != null ? 'Na ${zone.name}' : 'Sem zona detetada',
+                              style: TextStyle(
+                                color: zone?.color ?? AppTheme.textMuted,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Zona badge
+                      if (zone != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: zone.color.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: zone.color.withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(zone.icon, color: zone.color, size: 12),
+                              const SizedBox(width: 5),
+                              Text(
+                                zone.name,
+                                style: TextStyle(
+                                  color: zone.color,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppTheme.textMuted.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Sem zona',
+                            style: TextStyle(
+                              color: AppTheme.textMuted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 

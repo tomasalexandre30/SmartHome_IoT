@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 
 enum UserRole { admin, user }
@@ -30,11 +31,18 @@ class AppUser {
 class AuthService extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseDatabase _rtdb = FirebaseDatabase.instanceFor(
+    app: FirebaseDatabase.instance.app,
+    databaseURL: 'https://smartspaceiot-default-rtdb.europe-west1.firebasedatabase.app',
+  );
 
   AppUser? _appUser;
   AppUser? get appUser => _appUser;
   bool get isLoggedIn => _auth.currentUser != null;
   bool get isAdmin => _appUser?.isAdmin ?? false;
+
+  bool _accountDeleted = false;
+  bool get accountDeleted => _accountDeleted;
 
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
@@ -131,11 +139,93 @@ class AuthService extends ChangeNotifier {
         message: '${_appUser!.displayName} terminou sessão',
         role: _appUser!.role.name,
       );
+
+      // Marca como offline explicitamente
+      try {
+        await _rtdb
+            .ref('smartspace/users/${_auth.currentUser!.uid}')
+            .update({
+          'online': false,
+          'lastSeen': ServerValue.timestamp,
+          'currentZoneId': null,
+        });
+      } catch (e) {
+        debugPrint('[AUTH] Erro ao marcar offline no logout: $e');
+      }
     }
 
     await _auth.signOut();
+    _accountDeleted = false;
     _appUser = null;
     notifyListeners();
+  }
+
+  // ── Apagar conta ───────────────────────────────────────────────────────
+  Future<String?> deleteAccount({required String password}) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return 'Utilizador não encontrado.';
+
+      debugPrint('[AUTH] A apagar conta: ${user.uid}');
+
+      // Reautentica antes de apagar
+      try {
+        final credential = EmailAuthProvider.credential(
+          email: user.email!,
+          password: password,
+        );
+        await user.reauthenticateWithCredential(credential);
+        debugPrint('[AUTH] Reautenticação bem sucedida');
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+          return 'Password incorreta. Tenta novamente.';
+        }
+        return _errorMessage(e.code);
+      }
+
+      // Apaga preferências do Firestore
+      try {
+        final prefsSnap = await _db
+            .collection('users')
+            .doc(user.uid)
+            .collection('preferences')
+            .get();
+        for (final doc in prefsSnap.docs) {
+          await doc.reference.delete();
+        }
+        debugPrint('[AUTH] Preferências apagadas');
+      } catch (e) {
+        debugPrint('[AUTH] Erro ao apagar preferências: $e');
+      }
+
+      // Apaga perfil do Firestore
+      try {
+        await _db.collection('users').doc(user.uid).delete();
+        debugPrint('[AUTH] Perfil Firestore apagado');
+      } catch (e) {
+        debugPrint('[AUTH] Erro ao apagar perfil: $e');
+      }
+
+      // Remove da Realtime Database
+      try {
+        await _rtdb.ref('smartspace/users/${user.uid}').remove();
+        debugPrint('[AUTH] Realtime Database apagado');
+      } catch (e) {
+        debugPrint('[AUTH] Erro ao apagar RTDB: $e');
+      }
+
+      // Apaga conta do Firebase Auth
+      await user.delete();
+      debugPrint('[AUTH] Conta Firebase Auth apagada');
+
+      _accountDeleted = true;
+      _appUser = null;
+      notifyListeners();
+      return null;
+    } catch (e) {
+      debugPrint('[AUTH] Erro geral ao apagar conta: $e');
+      return 'Erro ao apagar conta. Tenta novamente.';
+    }
   }
 
   // ── Auth Log ───────────────────────────────────────────────────────────

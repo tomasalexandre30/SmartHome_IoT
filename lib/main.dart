@@ -60,11 +60,25 @@ class SmartSpaceApp extends StatelessWidget {
   }
 }
 
-class _AuthGate extends StatelessWidget {
+// ── Auth Gate ──────────────────────────────────────────────────────────────────
+
+class _AuthGate extends StatefulWidget {
   const _AuthGate();
 
   @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  bool _showMessage = false;
+  bool _wasDeleted = false;
+  bool _wasLoggedIn = false;
+
+  @override
   Widget build(BuildContext context) {
+    // USA READ em vez de WATCH para não causar rebuilds
+    final auth = context.read<AuthService>();
+
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
@@ -76,25 +90,135 @@ class _AuthGate extends StatelessWidget {
             ),
           );
         }
-        if (!snapshot.hasData) return const LoginScreen();
-        return _RoleGate();
+
+        final isLoggedIn = snapshot.hasData;
+
+        if (_wasLoggedIn && !isLoggedIn) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _wasDeleted = auth.accountDeleted;
+                _showMessage = true;
+              });
+              Future.delayed(const Duration(seconds: 3), () {
+                if (mounted) setState(() => _showMessage = false);
+              });
+            }
+          });
+        }
+        _wasLoggedIn = isLoggedIn;
+
+        if (isLoggedIn) return const _RoleGate();
+
+        return Stack(
+          children: [
+            const LoginScreen(),
+            if (_showMessage)
+              Positioned(
+                top: 0, left: 0, right: 0,
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: AnimatedOpacity(
+                      opacity: _showMessage ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 300),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _wasDeleted
+                              ? AppTheme.error.withOpacity(0.95)
+                              : AppTheme.success.withOpacity(0.95),
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_wasDeleted
+                                  ? AppTheme.error
+                                  : AppTheme.success)
+                                  .withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _wasDeleted
+                                  ? Icons.delete_forever_rounded
+                                  : Icons.check_circle_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _wasDeleted
+                                    ? 'Conta apagada permanentemente'
+                                    : 'Sessão terminada com sucesso',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
       },
     );
   }
 }
 
+// ── Role Gate ──────────────────────────────────────────────────────────────────
+
 class _RoleGate extends StatefulWidget {
+  const _RoleGate();
+
   @override
   State<_RoleGate> createState() => _RoleGateState();
 }
 
-class _RoleGateState extends State<_RoleGate> {
+class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
   bool _loading = true;
+  String? _uid;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final db = context.read<DatabaseService>();
+    if (_uid == null) return;
+
+    switch (state) {
+      case AppLifecycleState.resumed:
+        db.updateUserPresence(_uid!, true);
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        db.updateUserPresence(_uid!, false);
+        break;
+    }
   }
 
   Future<void> _load() async {
@@ -103,6 +227,7 @@ class _RoleGateState extends State<_RoleGate> {
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
+      _uid = uid;
       final db = context.read<DatabaseService>();
       final ss = context.read<SmartSpaceProvider>();
       await db.initialize(uid);
