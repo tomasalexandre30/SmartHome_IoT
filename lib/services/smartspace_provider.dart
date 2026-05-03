@@ -303,6 +303,8 @@ class SmartSpaceProvider extends ChangeNotifier {
       zoneId: zoneId,
       message: 'Automação: ${rule.label}',
       userName: 'Sistema',
+      userRole: 'system',
+      uid: _uid ?? '',
     ));
     notifyListeners();
   }
@@ -317,6 +319,8 @@ class SmartSpaceProvider extends ChangeNotifier {
       zoneId: '',
       message: v ? 'Ligação restabelecida' : 'Ligação perdida — modo autónomo',
       userName: 'Sistema',
+      userRole: 'system',
+      uid: _uid ?? '',
     ));
     notifyListeners();
   }

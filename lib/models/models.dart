@@ -303,6 +303,7 @@ class LogEvent {
   }) : timestamp = timestamp ?? DateTime.now();
 
   bool get isAdmin => userRole == 'admin';
+  bool get isSystem => userRole == 'system';
 
   LogCategory get category => type.category;
 
