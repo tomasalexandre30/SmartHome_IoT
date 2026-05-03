@@ -9,13 +9,25 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # BLE & permissions (já existentes)
   flutter_blue_plus: ^1.31.15
-  shared_preferences: ^2.2.2
-  provider: ^6.1.1
   permission_handler: ^11.1.0
+
+  # State & storage (já existentes)
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
+
+  # UI (já existentes)
   fl_chart: ^0.66.2
   intl: ^0.19.0
   cupertino_icons: ^1.0.6
+
+  # Firebase
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  firebase_database: ^11.1.4
 
 dev_dependencies:
   flutter_test:

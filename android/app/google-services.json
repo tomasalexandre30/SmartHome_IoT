@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "576480654054",
+    "project_id": "smartspaceiot",
+    "storage_bucket": "smartspaceiot.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:576480654054:android:4fdb67a8be187fc9764127",
+        "android_client_info": {
+          "package_name": "com.example.smarthome_iot"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDY7zdbX9E0IQivc_CCqV3jGT9LQm2C4hI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'theme/app_theme.dart';
 import 'models/models.dart';
 import 'services/beacon_service.dart';
 import 'services/smartspace_provider.dart';
+import 'services/auth_service.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/control_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +21,7 @@ void main() async {
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
   ));
+  await Firebase.initializeApp();
   await _requestPermissions();
   runApp(const SmartSpaceApp());
 }
@@ -37,6 +42,7 @@ class SmartSpaceApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => SmartSpaceProvider()),
         ChangeNotifierProvider(create: (_) {
           final ble = BeaconService();
@@ -48,8 +54,36 @@ class SmartSpaceApp extends StatelessWidget {
         title: 'SmartSpace',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.dark,
-        home: const _Root(),
+        home: const _AuthGate(),
       ),
+    );
+  }
+}
+
+// Decide automaticamente se mostra Login ou App
+class _AuthGate extends StatelessWidget {
+  const _AuthGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: AppTheme.background,
+            body: Center(
+              child: CircularProgressIndicator(color: AppTheme.accent),
+            ),
+          );
+        }
+
+        if (snapshot.hasData) {
+          return const _Root();
+        }
+
+        return const LoginScreen();
+      },
     );
   }
 }
@@ -71,7 +105,6 @@ class _RootState extends State<_Root> {
       final ble = context.read<BeaconService>();
       final ss  = context.read<SmartSpaceProvider>();
       ble.addListener(() => ss.updateZoneFromBeacon(ble.currentZoneId));
-      // Auto-start scanning
       ble.startScanning();
     });
   }
