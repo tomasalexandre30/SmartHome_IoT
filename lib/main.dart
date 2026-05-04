@@ -206,17 +206,25 @@ class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final db = context.read<DatabaseService>();
+    final ss = context.read<SmartSpaceProvider>();
+    final auth = context.read<AuthService>();
     if (_uid == null) return;
 
     switch (state) {
       case AppLifecycleState.resumed:
-        db.updateUserPresence(_uid!, true);
+      // Re-inicializa completamente — limpa zonas residuais e marca online
+        db.initialize(_uid!).then((_) {
+          ss.attachDatabase(db, _uid!, auth.appUser);
+        });
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
-        db.updateUserPresence(_uid!, false);
+      // Limpa zona atual antes de marcar offline
+        ss.clearZoneOnLogout().then((_) {
+          db.updateUserPresence(_uid!, false);
+        });
         break;
     }
   }

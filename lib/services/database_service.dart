@@ -13,15 +13,11 @@ class DatabaseService extends ChangeNotifier {
   bool _connected = false;
   bool get connected => _connected;
 
-  // ── Referências Realtime Database ──────────────────────────────────────
   DatabaseReference _zonesRef() => _db.ref('smartspace/zones');
   DatabaseReference _zoneRef(String id) => _db.ref('smartspace/zones/$id');
   DatabaseReference _userRef(String uid) => _db.ref('smartspace/users/$uid');
-
-  // ── Referências Firestore ──────────────────────────────────────────────
   CollectionReference _logsRef() => _firestore.collection('logs');
 
-  // ── Inicialização ──────────────────────────────────────────────────────
   Future<void> initialize(String uid) async {
     await _initializeZones();
     await _updateUserOnline(uid);
@@ -35,7 +31,6 @@ class DatabaseService extends ChangeNotifier {
     });
   }
 
-  // ── Zonas ──────────────────────────────────────────────────────────────
   Future<void> _initializeZones() async {
     try {
       final snapshot = await _zonesRef().get();
@@ -119,9 +114,7 @@ class DatabaseService extends ChangeNotifier {
     bool? motionDetected,
   }) async {
     try {
-      final updates = <String, dynamic>{
-        'lastUpdated': ServerValue.timestamp,
-      };
+      final updates = <String, dynamic>{'lastUpdated': ServerValue.timestamp};
       if (luminosity != null) updates['luminosity'] = luminosity;
       if (temperature != null) updates['temperature'] = temperature;
       if (humidity != null) updates['humidity'] = humidity;
@@ -132,31 +125,124 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ── Utilizador online ──────────────────────────────────────────────────
+  // ── FIX PRINCIPAL: limpa utilizador de TODAS as zonas no login ─────────
   Future<void> _updateUserOnline(String uid) async {
     try {
+      // 1. Varrer todas as zonas e remover este uid onde ainda apareça
+      final zonesSnap = await _zonesRef().get();
+      if (zonesSnap.exists) {
+        final zones = Map<String, dynamic>.from(zonesSnap.value as Map);
+        for (final entry in zones.entries) {
+          final zoneId = entry.key as String;
+          final zoneData = Map<String, dynamic>.from(entry.value as Map);
+          final presentUsers = zoneData['presentUsers'];
+
+          if (presentUsers is Map && presentUsers.containsKey(uid)) {
+            final currentCount = (zoneData['occupantCount'] as int? ?? 1);
+            final newCount = (currentCount - 1).clamp(0, 999);
+            // Path nested: remove só este uid, não apaga os outros
+            await _zoneRef(zoneId).update({
+              'presentUsers/$uid': null,
+              'occupantCount': newCount,
+              'status': newCount == 0 ? 'free' : 'occupied',
+              'lastUpdated': ServerValue.timestamp,
+            });
+            debugPrint('[DB] Login cleanup: removido $uid de $zoneId ($currentCount→$newCount)');
+          }
+        }
+      }
+
+      // 2. Marcar online com zona limpa
       await _userRef(uid).update({
         'online': true,
         'lastSeen': ServerValue.timestamp,
         'currentZoneId': null,
       });
-      // onDisconnect para casos de crash ou perda de rede
+
+      // 3. onDisconnect estático para crash/perda de rede
       await _userRef(uid).onDisconnect().update({
         'online': false,
         'lastSeen': ServerValue.timestamp,
         'currentZoneId': null,
       });
+
+      // No fim do _updateUserOnline, após o onDisconnect existente:
+      await _userRef(uid).onDisconnect().update({
+        'online': false,
+        'lastSeen': ServerValue.timestamp,
+        'currentZoneId': null,
+      });
+
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar utilizador online: $e');
     }
   }
 
+  /// Remove um utilizador de uma zona específica.
+  /// Usado pelo SmartSpaceProvider no clearZoneOnLogout.
+  Future<void> removeUserFromZone(String uid, String zoneId) async {
+    try {
+      final snap = await _zoneRef(zoneId).get();
+      if (!snap.exists) return;
+      final zoneData = Map<String, dynamic>.from(snap.value as Map);
+      final presentUsers = zoneData['presentUsers'];
+
+      if (presentUsers is Map && presentUsers.containsKey(uid)) {
+        final currentCount = (zoneData['occupantCount'] as int? ?? 1);
+        final newCount = (currentCount - 1).clamp(0, 999);
+        await _zoneRef(zoneId).update({
+          'presentUsers/$uid': null,
+          'occupantCount': newCount,
+          'status': newCount == 0 ? 'free' : 'occupied',
+          'lastUpdated': ServerValue.timestamp,
+        });
+        debugPrint('[DB] removeUserFromZone: $uid saiu de $zoneId ($currentCount→$newCount)');
+      }
+    } catch (e) {
+      debugPrint('[DB] Erro ao remover utilizador da zona: $e');
+    }
+  }
+
   Future<void> updateUserZone(String uid, String? zoneId) async {
     try {
+      // Cancelar onDisconnects anteriores de zonas
+      for (final zone in DefaultData.zones()) {
+        await _zoneRef(zone.id).child('presentUsers/$uid').onDisconnect().cancel();
+        await _zoneRef(zone.id).child('occupantCount').onDisconnect().cancel();
+      }
+
       await _userRef(uid).update({
         'currentZoneId': zoneId,
         'lastSeen': ServerValue.timestamp,
       });
+
+      // Se entrou numa zona nova, registar onDisconnect nessa zona
+      if (zoneId != null) {
+        // Remove o utilizador do presentUsers ao desligar
+        await _zoneRef(zoneId)
+            .child('presentUsers/$uid')
+            .onDisconnect()
+            .remove();
+
+        // Vai buscar o count atual e regista onDisconnect com valor correto
+        final snap = await _zoneRef(zoneId).child('occupantCount').get();
+        final currentCount = (snap.value as int? ?? 1);
+        final newCount = (currentCount - 1).clamp(0, 999);
+
+        await _zoneRef(zoneId).onDisconnect().update({
+          'occupantCount': newCount,
+          'status': newCount == 0 ? 'free' : 'occupied',
+          'lastUpdated': ServerValue.timestamp,
+        });
+      }
+
+      // onDisconnect do utilizador
+      await _userRef(uid).onDisconnect().update({
+        'online': false,
+        'lastSeen': ServerValue.timestamp,
+        'currentZoneId': null,
+      });
+
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar zona do utilizador: $e');
     }
@@ -177,7 +263,6 @@ class DatabaseService extends ChangeNotifier {
 
       if (onlineUids.isEmpty) return [];
 
-      // Vai buscar perfis do Firestore
       final List<OnlineUser> users = [];
       for (final uid in onlineUids) {
         final userData = Map<String, dynamic>.from(data[uid] as Map);
@@ -204,8 +289,6 @@ class DatabaseService extends ChangeNotifier {
       return users;
     });
   }
-
-  // ── Logs no Firestore ──────────────────────────────────────────────────
 
   Future<void> saveLog(LogEvent event, String uid, String role) async {
     try {
@@ -283,8 +366,6 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ── Preferências no Firestore ──────────────────────────────────────────
-
   Future<void> savePreferences(String uid, UserPreferences prefs) async {
     try {
       await _firestore
@@ -305,7 +386,6 @@ class DatabaseService extends ChangeNotifier {
           .doc(uid)
           .collection('preferences')
           .get();
-
       return {
         for (final doc in snap.docs)
           doc.id: UserPreferences.fromJson(doc.data())
@@ -328,7 +408,6 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ── Cleanup ────────────────────────────────────────────────────────────
   Future<void> goOffline(String uid) async {
     try {
       await _userRef(uid).update({
@@ -341,8 +420,6 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 }
-
-// ── Modelos auxiliares ─────────────────────────────────────────────────────────
 
 class ZoneUpdate {
   final String zoneId;
@@ -367,4 +444,3 @@ class OnlineUser {
 
   bool get isAdmin => role == 'admin';
 }
-

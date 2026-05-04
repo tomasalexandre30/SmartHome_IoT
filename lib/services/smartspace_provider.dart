@@ -5,7 +5,6 @@ import 'database_service.dart';
 import 'auth_service.dart';
 
 class SmartSpaceProvider extends ChangeNotifier {
-  // ── State ──────────────────────────────────────────────────────────────
   List<Zone> _zones = DefaultData.zones();
   List<Zone> get zones => _zones;
 
@@ -28,7 +27,6 @@ class SmartSpaceProvider extends ChangeNotifier {
   final List<Function()> _pendingCommands = [];
   Timer? _prefsLogTimer;
 
-  // ── Database ───────────────────────────────────────────────────────────
   DatabaseService? _db;
   String? _uid;
   AppUser? _appUser;
@@ -38,6 +36,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     _db = db;
     _uid = uid;
     _appUser = appUser;
+    _currentZoneId = null; // ← ADICIONAR ESTE RESET
     _listenZones();
     _listenConnection();
     _loadPreferences();
@@ -67,7 +66,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       final prefs = await _db!.loadPreferences(_uid!);
       _preferences.addAll(prefs);
       notifyListeners();
-      debugPrint('[SS] Preferências carregadas: ${prefs.length} zonas');
     } catch (e) {
       debugPrint('[SS] Erro ao carregar preferências: $e');
     }
@@ -75,11 +73,15 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   void _applyZoneUpdate(ZoneUpdate update) {
     final d = update.data;
+
+    // FIX: clamp defensivo — nunca mostrar valores negativos na UI
+    final safeCount = ((d['occupantCount'] as int?) ?? 0).clamp(0, 999);
+
     _zones = _zones.map((z) {
       if (z.id != update.zoneId) return z;
       return z.copyWith(
         status: _parseStatus(d['status'] as String? ?? 'unknown'),
-        occupantCount: d['occupantCount'] as int? ?? 0,
+        occupantCount: safeCount,
         lightOn: d['lightOn'] as bool? ?? false,
         lightIntensity: (d['lightIntensity'] as num?)?.toDouble() ?? 1.0,
         buzzerOn: d['buzzerOn'] as bool? ?? false,
@@ -103,7 +105,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     }
   }
 
-  // ── Zone helpers ───────────────────────────────────────────────────────
   Zone? zoneById(String id) {
     try { return _zones.firstWhere((z) => z.id == id); }
     catch (_) { return null; }
@@ -117,12 +118,12 @@ class SmartSpaceProvider extends ChangeNotifier {
 
     if (prev != null) {
       final prevZone = zoneById(prev);
-      final newCount = (prevZone?.occupantCount ?? 1) - 1;
+      final newCount = ((prevZone?.occupantCount ?? 1) - 1).clamp(0, 999);
       final newUsers = [...?prevZone?.presentUsers]..remove(_displayName);
 
       _updateZone(prev, (z) => z.copyWith(
         status: newCount <= 0 ? ZoneStatus.free : ZoneStatus.occupied,
-        occupantCount: newCount.clamp(0, 99),
+        occupantCount: newCount,
         presentUsers: newUsers,
       ));
 
@@ -130,7 +131,7 @@ class SmartSpaceProvider extends ChangeNotifier {
         _db?.updateZoneOccupancy(
           prev,
           newCount <= 0 ? 'free' : 'occupied',
-          newCount.clamp(0, 99),
+          newCount,
           newUsers,
         );
         _db?.updateUserZone(_uid!, null);
@@ -138,7 +139,7 @@ class SmartSpaceProvider extends ChangeNotifier {
         _pendingCommands.add(() => _db?.updateZoneOccupancy(
           prev,
           newCount <= 0 ? 'free' : 'occupied',
-          newCount.clamp(0, 99),
+          newCount,
           newUsers,
         ));
       }
@@ -198,6 +199,50 @@ class SmartSpaceProvider extends ChangeNotifier {
     _zones = _zones.map((z) => z.id == id ? fn(z) : z).toList();
   }
 
+  // ── FIX: clearZoneOnLogout completo ───────────────────────────────────
+  /// Chamar ANTES de auth.logout() e ANTES de auth.deleteAccount().
+  Future<void> clearZoneOnLogout() async {
+    if (_uid == null) return;
+
+    final prev = _currentZoneId;
+    _currentZoneId = null;
+
+    if (prev != null) {
+      final prevZone = zoneById(prev);
+      final newCount = ((prevZone?.occupantCount ?? 1) - 1).clamp(0, 999);
+      final newUsers = [...?prevZone?.presentUsers]..remove(_displayName);
+
+      _updateZone(prev, (z) => z.copyWith(
+        status: newCount <= 0 ? ZoneStatus.free : ZoneStatus.occupied,
+        occupantCount: newCount,
+        presentUsers: newUsers,
+      ));
+
+      if (_isConnected && _db != null) {
+        // Usa removeUserFromZone que faz path nested no Firebase
+        await _db!.removeUserFromZone(_uid!, prev);
+        await _db!.updateUserZone(_uid!, null);
+      }
+
+      _log(LogEvent(
+        id: _uid_(),
+        type: LogEventType.zoneExit,
+        zoneId: prev,
+        message: '$_displayName saiu da ${prevZone?.name ?? prev} (logout)',
+        userName: _displayName,
+        userRole: _appUser?.role.name ?? 'user',
+        uid: _uid ?? '',
+      ));
+    }
+
+    // Cancelar subscription e limpar pendentes
+    _zonesSub?.cancel();
+    _zonesSub = null;
+    _pendingCommands.clear();
+
+    notifyListeners();
+  }
+
   // ── Manual commands ────────────────────────────────────────────────────
   void toggleLight(String zoneId) {
     final z = zoneById(zoneId);
@@ -234,8 +279,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     if (_isConnected) {
       _db?.updateZoneLight(zoneId, z.lightOn, value);
     } else {
-      _pendingCommands
-          .add(() => _db?.updateZoneLight(zoneId, z.lightOn, value));
+      _pendingCommands.add(() => _db?.updateZoneLight(zoneId, z.lightOn, value));
     }
     notifyListeners();
   }
@@ -266,7 +310,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Mock sensor data ───────────────────────────────────────────────────
   void injectSensorData(String zoneId, {
     double? luminosity,
     double? temperature,
@@ -298,7 +341,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Preferences ────────────────────────────────────────────────────────
   UserPreferences preferencesFor(String zoneId) =>
       _preferences[zoneId] ?? UserPreferences(zoneId: zoneId);
 
@@ -308,7 +350,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       _db!.savePreferences(_uid!, prefs);
     }
 
-    // Debounce — só regista log 1 segundo depois de parar de mexer
     _prefsLogTimer?.cancel();
     _prefsLogTimer = Timer(const Duration(seconds: 1), () {
       _log(LogEvent(
@@ -357,7 +398,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     ));
   }
 
-  // ── Automation rules ───────────────────────────────────────────────────
   void checkAutomations(String zoneId) {
     final z = zoneById(zoneId);
     if (z == null) return;
@@ -396,8 +436,7 @@ class SmartSpaceProvider extends ChangeNotifier {
         if (_isConnected) {
           _db?.updateZoneLight(zoneId, true, 1.0);
         } else {
-          _pendingCommands
-              .add(() => _db?.updateZoneLight(zoneId, true, 1.0));
+          _pendingCommands.add(() => _db?.updateZoneLight(zoneId, true, 1.0));
         }
         break;
       case 'light_off':
@@ -405,8 +444,7 @@ class SmartSpaceProvider extends ChangeNotifier {
         if (_isConnected) {
           _db?.updateZoneLight(zoneId, false, 0.0);
         } else {
-          _pendingCommands
-              .add(() => _db?.updateZoneLight(zoneId, false, 0.0));
+          _pendingCommands.add(() => _db?.updateZoneLight(zoneId, false, 0.0));
         }
         break;
       case 'buzzer':
@@ -430,17 +468,13 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Connection ─────────────────────────────────────────────────────────
   void setConnected(bool v) {
     if (_isConnected == v) return;
     _isConnected = v;
 
     if (v && _pendingCommands.isNotEmpty) {
-      debugPrint(
-          '[SS] Sincronizando ${_pendingCommands.length} comandos pendentes...');
-      for (final cmd in _pendingCommands) {
-        cmd();
-      }
+      debugPrint('[SS] Sincronizando ${_pendingCommands.length} comandos pendentes...');
+      for (final cmd in _pendingCommands) cmd();
       _pendingCommands.clear();
     }
 
@@ -458,25 +492,13 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Log ────────────────────────────────────────────────────────────────
   void _log(LogEvent e) {
-    final enriched = LogEvent(
-      id: e.id,
-      type: e.type,
-      zoneId: e.zoneId,
-      message: e.message,
-      userName: e.userName,
-      userRole: e.userRole,
-      uid: e.uid,
-      timestamp: e.timestamp,
-    );
-    _logs.add(enriched);
+    _logs.add(e);
     if (_logs.length > 200) _logs.removeAt(0);
     if (_db != null && _uid != null && _isConnected) {
-      _db!.saveLog(enriched, _uid!, enriched.userRole);
+      _db!.saveLog(e, _uid!, e.userRole);
     } else if (!_isConnected) {
-      _pendingCommands
-          .add(() => _db!.saveLog(enriched, _uid!, enriched.userRole));
+      _pendingCommands.add(() => _db!.saveLog(e, _uid!, e.userRole));
     }
   }
 
@@ -485,7 +507,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Cleanup ────────────────────────────────────────────────────────────
   @override
   void dispose() {
     _prefsLogTimer?.cancel();
@@ -493,7 +514,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────
   int _counter = 0;
   String _uid_() => '${DateTime.now().millisecondsSinceEpoch}_${_counter++}';
 }
