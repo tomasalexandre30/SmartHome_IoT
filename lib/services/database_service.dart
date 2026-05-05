@@ -93,13 +93,14 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
+  // ✅ FIX: recebe uids separados — presentUsers guarda UIDs, não displayNames
   Future<void> updateZoneOccupancy(
-      String zoneId, String status, int count, List<String> users) async {
+      String zoneId, String status, int count, List<String> uids) async {
     try {
       await _zoneRef(zoneId).update({
         'status': status,
         'occupantCount': count,
-        'presentUsers': {for (final u in users) u: true},
+        'presentUsers': {for (final uid in uids) uid: true},
         'lastUpdated': ServerValue.timestamp,
       });
     } catch (e) {
@@ -125,10 +126,9 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ── FIX PRINCIPAL: limpa utilizador de TODAS as zonas no login ─────────
+  // ✅ FIX: ao fazer login, limpa uid de TODAS as zonas onde ainda apareça
   Future<void> _updateUserOnline(String uid) async {
     try {
-      // 1. Varrer todas as zonas e remover este uid onde ainda apareça
       final zonesSnap = await _zonesRef().get();
       if (zonesSnap.exists) {
         final zones = Map<String, dynamic>.from(zonesSnap.value as Map);
@@ -140,7 +140,6 @@ class DatabaseService extends ChangeNotifier {
           if (presentUsers is Map && presentUsers.containsKey(uid)) {
             final currentCount = (zoneData['occupantCount'] as int? ?? 1);
             final newCount = (currentCount - 1).clamp(0, 999);
-            // Path nested: remove só este uid, não apaga os outros
             await _zoneRef(zoneId).update({
               'presentUsers/$uid': null,
               'occupantCount': newCount,
@@ -152,21 +151,13 @@ class DatabaseService extends ChangeNotifier {
         }
       }
 
-      // 2. Marcar online com zona limpa
       await _userRef(uid).update({
         'online': true,
         'lastSeen': ServerValue.timestamp,
         'currentZoneId': null,
       });
 
-      // 3. onDisconnect estático para crash/perda de rede
-      await _userRef(uid).onDisconnect().update({
-        'online': false,
-        'lastSeen': ServerValue.timestamp,
-        'currentZoneId': null,
-      });
-
-      // No fim do _updateUserOnline, após o onDisconnect existente:
+      // onDisconnect estático — cobre crash/perda de rede
       await _userRef(uid).onDisconnect().update({
         'online': false,
         'lastSeen': ServerValue.timestamp,
@@ -178,8 +169,7 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  /// Remove um utilizador de uma zona específica.
-  /// Usado pelo SmartSpaceProvider no clearZoneOnLogout.
+  // ✅ FIX: remove uid da zona pelo path nested — não toca nos outros utilizadores
   Future<void> removeUserFromZone(String uid, String zoneId) async {
     try {
       final snap = await _zoneRef(zoneId).get();
@@ -205,10 +195,10 @@ class DatabaseService extends ChangeNotifier {
 
   Future<void> updateUserZone(String uid, String? zoneId) async {
     try {
-      // Cancelar onDisconnects anteriores de zonas
+      // Cancela onDisconnects anteriores de zonas
       for (final zone in DefaultData.zones()) {
         await _zoneRef(zone.id).child('presentUsers/$uid').onDisconnect().cancel();
-        await _zoneRef(zone.id).child('occupantCount').onDisconnect().cancel();
+        await _zoneRef(zone.id).onDisconnect().cancel();
       }
 
       await _userRef(uid).update({
@@ -216,15 +206,11 @@ class DatabaseService extends ChangeNotifier {
         'lastSeen': ServerValue.timestamp,
       });
 
-      // Se entrou numa zona nova, registar onDisconnect nessa zona
       if (zoneId != null) {
-        // Remove o utilizador do presentUsers ao desligar
-        await _zoneRef(zoneId)
-            .child('presentUsers/$uid')
-            .onDisconnect()
-            .remove();
+        // Remove o uid do presentUsers ao desligar abruptamente
+        await _zoneRef(zoneId).child('presentUsers/$uid').onDisconnect().remove();
 
-        // Vai buscar o count atual e regista onDisconnect com valor correto
+        // Regista onDisconnect com count decrementado
         final snap = await _zoneRef(zoneId).child('occupantCount').get();
         final currentCount = (snap.value as int? ?? 1);
         final newCount = (currentCount - 1).clamp(0, 999);
@@ -236,7 +222,6 @@ class DatabaseService extends ChangeNotifier {
         });
       }
 
-      // onDisconnect do utilizador
       await _userRef(uid).onDisconnect().update({
         'online': false,
         'lastSeen': ServerValue.timestamp,

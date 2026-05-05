@@ -466,7 +466,7 @@ class _ProfileSheet extends StatelessWidget {
   void _confirmLogout(BuildContext context) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: AppTheme.surfaceCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
@@ -483,14 +483,17 @@ class _ProfileSheet extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              Navigator.pop(dialogContext);
               Navigator.pop(context);
-              Navigator.pop(context);
-              auth.logout();
+              // ✅ FIX: limpa zona ANTES de logout
+              final ss = context.read<SmartSpaceProvider>();
+              await ss.clearZoneOnLogout();
+              await auth.logout();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.error,
@@ -550,8 +553,11 @@ class _ProfileSheet extends StatelessWidget {
                   hintStyle: const TextStyle(color: AppTheme.textMuted),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                      color: AppTheme.textMuted, size: 18,
+                      obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      color: AppTheme.textMuted,
+                      size: 18,
                     ),
                     onPressed: () => setDialogState(() => obscure = !obscure),
                   ),
@@ -568,9 +574,12 @@ class _ProfileSheet extends StatelessWidget {
               onPressed: () async {
                 if (passwordCtrl.text.isEmpty) return;
                 Navigator.pop(dialogContext);
-                Navigator.pop(context); // fecha sheet
-
-                final error = await auth.deleteAccount(password: passwordCtrl.text);
+                Navigator.pop(context);
+                // ✅ FIX: limpa zona ANTES de apagar conta
+                final ss = context.read<SmartSpaceProvider>();
+                await ss.clearZoneOnLogout();
+                final error =
+                await auth.deleteAccount(password: passwordCtrl.text);
                 if (error != null && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(

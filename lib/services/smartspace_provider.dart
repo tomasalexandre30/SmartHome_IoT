@@ -36,7 +36,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     _db = db;
     _uid = uid;
     _appUser = appUser;
-    _currentZoneId = null; // ← ADICIONAR ESTE RESET
+    _currentZoneId = null;
     _listenZones();
     _listenConnection();
     _loadPreferences();
@@ -73,8 +73,6 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   void _applyZoneUpdate(ZoneUpdate update) {
     final d = update.data;
-
-    // FIX: clamp defensivo — nunca mostrar valores negativos na UI
     final safeCount = ((d['occupantCount'] as int?) ?? 0).clamp(0, 999);
 
     _zones = _zones.map((z) {
@@ -89,6 +87,7 @@ class SmartSpaceProvider extends ChangeNotifier {
         temperature: (d['temperature'] as num?)?.toDouble(),
         humidity: (d['humidity'] as num?)?.toDouble(),
         motionDetected: d['motionDetected'] as bool?,
+        // ✅ FIX: presentUsers vem da RTDB como UIDs
         presentUsers: d['presentUsers'] != null
             ? List<String>.from(
             (d['presentUsers'] as Map).keys.map((k) => k.toString()))
@@ -110,21 +109,23 @@ class SmartSpaceProvider extends ChangeNotifier {
     catch (_) { return null; }
   }
 
+  // ✅ FIX: usa _uid em vez de _displayName para presentUsers
   void updateZoneFromBeacon(String? zoneId) {
     if (zoneId == _currentZoneId) return;
+    if (_uid == null) return;
 
     final prev = _currentZoneId;
     _currentZoneId = zoneId;
 
     if (prev != null) {
       final prevZone = zoneById(prev);
-      final newCount = ((prevZone?.occupantCount ?? 1) - 1).clamp(0, 999);
-      final newUsers = [...?prevZone?.presentUsers]..remove(_displayName);
+      final prevUids = [...?prevZone?.presentUsers]..remove(_uid);
+      final newCount = prevUids.length;
 
       _updateZone(prev, (z) => z.copyWith(
         status: newCount <= 0 ? ZoneStatus.free : ZoneStatus.occupied,
         occupantCount: newCount,
-        presentUsers: newUsers,
+        presentUsers: prevUids,
       ));
 
       if (_isConnected) {
@@ -132,7 +133,7 @@ class SmartSpaceProvider extends ChangeNotifier {
           prev,
           newCount <= 0 ? 'free' : 'occupied',
           newCount,
-          newUsers,
+          prevUids,
         );
         _db?.updateUserZone(_uid!, null);
       } else {
@@ -140,7 +141,7 @@ class SmartSpaceProvider extends ChangeNotifier {
           prev,
           newCount <= 0 ? 'free' : 'occupied',
           newCount,
-          newUsers,
+          prevUids,
         ));
       }
 
@@ -158,21 +159,23 @@ class SmartSpaceProvider extends ChangeNotifier {
 
     if (zoneId != null) {
       final newZone = zoneById(zoneId);
-      final newCount = (newZone?.occupantCount ?? 0) + 1;
-      final newUsers = [...?newZone?.presentUsers, _displayName];
+      // ✅ FIX: adiciona o UID, não o displayName
+      final newUids = [...?newZone?.presentUsers];
+      if (!newUids.contains(_uid)) newUids.add(_uid!);
+      final newCount = newUids.length;
 
       _updateZone(zoneId, (z) => z.copyWith(
         status: ZoneStatus.occupied,
         occupantCount: newCount,
-        presentUsers: newUsers,
+        presentUsers: newUids,
       ));
 
       if (_isConnected) {
-        _db?.updateZoneOccupancy(zoneId, 'occupied', newCount, newUsers);
+        _db?.updateZoneOccupancy(zoneId, 'occupied', newCount, newUids);
         _db?.updateUserZone(_uid!, zoneId);
       } else {
         _pendingCommands.add(() =>
-            _db?.updateZoneOccupancy(zoneId, 'occupied', newCount, newUsers));
+            _db?.updateZoneOccupancy(zoneId, 'occupied', newCount, newUids));
       }
 
       _log(LogEvent(
@@ -199,8 +202,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     _zones = _zones.map((z) => z.id == id ? fn(z) : z).toList();
   }
 
-  // ── FIX: clearZoneOnLogout completo ───────────────────────────────────
-  /// Chamar ANTES de auth.logout() e ANTES de auth.deleteAccount().
+  // ✅ FIX: usa removeUserFromZone (path nested) em vez de updateZoneOccupancy
   Future<void> clearZoneOnLogout() async {
     if (_uid == null) return;
 
@@ -209,17 +211,8 @@ class SmartSpaceProvider extends ChangeNotifier {
 
     if (prev != null) {
       final prevZone = zoneById(prev);
-      final newCount = ((prevZone?.occupantCount ?? 1) - 1).clamp(0, 999);
-      final newUsers = [...?prevZone?.presentUsers]..remove(_displayName);
-
-      _updateZone(prev, (z) => z.copyWith(
-        status: newCount <= 0 ? ZoneStatus.free : ZoneStatus.occupied,
-        occupantCount: newCount,
-        presentUsers: newUsers,
-      ));
 
       if (_isConnected && _db != null) {
-        // Usa removeUserFromZone que faz path nested no Firebase
         await _db!.removeUserFromZone(_uid!, prev);
         await _db!.updateUserZone(_uid!, null);
       }
@@ -235,7 +228,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       ));
     }
 
-    // Cancelar subscription e limpar pendentes
     _zonesSub?.cancel();
     _zonesSub = null;
     _pendingCommands.clear();
@@ -243,7 +235,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Manual commands ────────────────────────────────────────────────────
   void toggleLight(String zoneId) {
     final z = zoneById(zoneId);
     if (z == null) return;
