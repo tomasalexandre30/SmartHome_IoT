@@ -6,7 +6,7 @@ import '../../theme/app_theme.dart';
 import 'user_dashboard_screen.dart';
 import 'user_control_screen.dart';
 import 'user_preferences_screen.dart';
-import '../settings_screen.dart';
+import 'user_settings_screen.dart';
 
 class UserShell extends StatefulWidget {
   const UserShell({super.key});
@@ -33,7 +33,7 @@ class _UserShellState extends State<UserShell> {
     UserDashboardScreen(),
     UserControlScreen(),
     UserPreferencesScreen(),
-    SettingsScreen(),
+    UserSettingsScreen(),
   ];
 
   static const _navItems = [

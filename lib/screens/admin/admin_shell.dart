@@ -7,7 +7,7 @@ import '../../models/models.dart';
 import 'admin_dashboard_screen.dart';
 import 'admin_zones_screen.dart';
 import 'admin_history_screen.dart';
-import '../settings_screen.dart';
+import 'admin_settings_screen.dart';
 
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
@@ -38,7 +38,7 @@ class _AdminShellState extends State<AdminShell> {
     const AdminDashboardScreen(),
     const AdminZonesScreen(),
     AdminHistoryScreen(),
-    const SettingsScreen(),
+    const AdminSettingsScreen(),
   ];
 
   int _alertCount(List<LogEvent> logs) => logs
