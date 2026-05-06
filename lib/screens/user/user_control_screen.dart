@@ -25,23 +25,18 @@ class UserControlScreen extends StatelessWidget {
               : ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             children: [
-
-              // ── Zona atual ───────────────────────────────────────
               _CurrentZoneBanner(zone: currentZone),
-              const SizedBox(height: 20),
-
-              // ── Comandos on-demand ───────────────────────────────
-              const SectionHeader(title: 'Comandos on-demand'),
-              _CommandsCard(zone: currentZone),
-              const SizedBox(height: 20),
-
-              // ── Sensores ─────────────────────────────────────────
+              const SizedBox(height: 24),
+              const SectionHeader(title: 'Controlos'),
+              const SizedBox(height: 10),
+              _ControlsGrid(zone: currentZone),
+              const SizedBox(height: 24),
               const SectionHeader(title: 'Sensores da zona'),
+              const SizedBox(height: 10),
               _SensorsCard(zone: currentZone),
-              const SizedBox(height: 20),
-
-              // ── Outras zonas (só leitura) ─────────────────────────
+              const SizedBox(height: 24),
               const SectionHeader(title: 'Estado das outras zonas'),
+              const SizedBox(height: 10),
               ...ss.zones
                   .where((z) => z.id != currentZoneId)
                   .map((z) => Padding(
@@ -77,18 +72,14 @@ class _NoZoneState extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
               ),
               child: Icon(
-                scanning
-                    ? Icons.bluetooth_searching_rounded
-                    : Icons.location_off_rounded,
+                scanning ? Icons.bluetooth_searching_rounded : Icons.location_off_rounded,
                 color: AppTheme.accent,
                 size: 36,
               ),
             ),
             const SizedBox(height: 20),
             Text(
-              scanning
-                  ? 'À procura da tua zona...'
-                  : 'Nenhuma zona detetada',
+              scanning ? 'À procura da tua zona...' : 'Nenhuma zona detetada',
               style: const TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: 18,
@@ -98,11 +89,10 @@ class _NoZoneState extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               scanning
-                  ? 'Os controlos ficam disponíveis quando a tua zona for detetada via BLE.'
+                  ? 'Os controlos ficam disponíveis quando a tua zona for detetada.'
                   : 'Ativa o scan BLE no Dashboard para detetar a tua zona.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 14),
+              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
             ),
           ],
         ),
@@ -120,15 +110,15 @@ class _CurrentZoneBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: SS.glowCard(glowColor: zone.color),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            width: 52, height: 52,
             decoration: BoxDecoration(
               color: zone.color.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(15),
             ),
             child: Icon(zone.icon, color: zone.color, size: 26),
           ),
@@ -142,18 +132,23 @@ class _CurrentZoneBanner extends StatelessWidget {
                         color: AppTheme.textMuted,
                         fontSize: 11,
                         fontWeight: FontWeight.w600)),
-                Text(
-                  zone.name,
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  '${zone.occupantCount} ocupante${zone.occupantCount != 1 ? "s" : ""}',
-                  style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12),
+                const SizedBox(height: 2),
+                Text(zone.name,
+                    style: const TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    )),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    const Icon(Icons.people_rounded, size: 12, color: AppTheme.textMuted),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${zone.occupantCount} ocupante${zone.occupantCount != 1 ? "s" : ""}',
+                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -165,143 +160,203 @@ class _CurrentZoneBanner extends StatelessWidget {
   }
 }
 
-// ── Commands Card ──────────────────────────────────────────────────────────────
+// ── Controls Grid ──────────────────────────────────────────────────────────────
 
-class _CommandsCard extends StatelessWidget {
+class _ControlsGrid extends StatelessWidget {
   final Zone zone;
-  const _CommandsCard({required this.zone});
+  const _ControlsGrid({required this.zone});
 
   @override
   Widget build(BuildContext context) {
     final ss = context.read<SmartSpaceProvider>();
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: SS.card(),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _CommandBtn(
-                  icon: zone.lightOn
-                      ? Icons.lightbulb_rounded
-                      : Icons.lightbulb_outline_rounded,
-                  label: 'LED RGB',
-                  status: zone.lightOn ? 'Ligado' : 'Desligado',
-                  active: zone.lightOn,
-                  color: AppTheme.warning,
-                  onTap: () => ss.toggleLight(zone.id),
-                ),
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _BigToggleBtn(
+                icon: zone.lightOn
+                    ? Icons.lightbulb_rounded
+                    : Icons.lightbulb_outline_rounded,
+                label: 'LED RGB',
+                sublabel: zone.lightOn ? 'Ligado' : 'Desligado',
+                active: zone.lightOn,
+                color: AppTheme.warning,
+                onTap: () => ss.toggleLight(zone.id),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _CommandBtn(
-                  icon: zone.buzzerOn
-                      ? Icons.volume_up_rounded
-                      : Icons.volume_off_rounded,
-                  label: 'Buzzer',
-                  status: zone.buzzerOn ? 'Ativo' : 'Inativo',
-                  active: zone.buzzerOn,
-                  color: AppTheme.error,
-                  onTap: () => ss.toggleBuzzer(zone.id),
-                ),
-              ),
-            ],
-          ),
-          if (zone.lightOn) ...[
-            const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const Icon(Icons.brightness_6_rounded,
-                    color: AppTheme.warning, size: 16),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text('Intensidade da luz',
-                      style: TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 13)),
-                ),
-                Text('${(zone.lightIntensity * 100).toInt()}%',
-                    style: const TextStyle(
-                        color: AppTheme.warning,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700)),
-              ],
             ),
-            Slider(
-              value: zone.lightIntensity,
-              onChanged: (v) => ss.setLightIntensity(zone.id, v),
-              activeColor: AppTheme.warning,
-              inactiveColor: AppTheme.border,
+            const SizedBox(width: 12),
+            Expanded(
+              child: _BigToggleBtn(
+                icon: zone.buzzerOn
+                    ? Icons.volume_up_rounded
+                    : Icons.volume_off_rounded,
+                label: 'Buzzer',
+                sublabel: zone.buzzerOn ? 'Ativo' : 'Inativo',
+                active: zone.buzzerOn,
+                color: AppTheme.error,
+                onTap: () => ss.toggleBuzzer(zone.id),
+              ),
             ),
           ],
+        ),
+        if (zone.lightOn) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            decoration: SS.card(),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 32, height: 32,
+                      decoration: SS.iconBox(color: AppTheme.warning),
+                      child: const Icon(Icons.brightness_6_rounded,
+                          color: AppTheme.warning, size: 16),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text('Intensidade da luz',
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warning.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${(zone.lightIntensity * 100).toInt()}%',
+                        style: const TextStyle(
+                            color: AppTheme.warning,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 4,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                  ),
+                  child: Slider(
+                    value: zone.lightIntensity,
+                    onChanged: (v) => ss.setLightIntensity(zone.id, v),
+                    activeColor: AppTheme.warning,
+                    inactiveColor: AppTheme.border,
+                  ),
+                ),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('0%', style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                    Text('100%', style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
-      ),
+      ],
     );
   }
 }
 
-// ── Command Button ─────────────────────────────────────────────────────────────
+// ── Big Toggle Button ──────────────────────────────────────────────────────────
 
-class _CommandBtn extends StatelessWidget {
+class _BigToggleBtn extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String status;
+  final String sublabel;
   final bool active;
   final Color color;
   final VoidCallback onTap;
 
-  const _CommandBtn({
+  const _BigToggleBtn({
     required this.icon,
     required this.label,
-    required this.status,
+    required this.sublabel,
     required this.active,
     required this.color,
     required this.onTap,
   });
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: active ? color.withOpacity(0.12) : AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: active ? color.withOpacity(0.4) : AppTheme.border),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: active ? color : AppTheme.textMuted, size: 28),
-          const SizedBox(height: 8),
-          Text(label,
-              style: TextStyle(
-                color: active ? color : AppTheme.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              )),
-          const SizedBox(height: 2),
-          Text(status,
-              style: TextStyle(
-                color: active ? color : AppTheme.textMuted,
-                fontSize: 11,
-              )),
-          const SizedBox(height: 8),
-          Icon(
-            active
-                ? Icons.toggle_on_rounded
-                : Icons.toggle_off_rounded,
-            color: active ? color : AppTheme.textMuted,
-            size: 32,
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: active ? color.withOpacity(0.10) : AppTheme.surfaceCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: active ? color.withOpacity(0.35) : AppTheme.border,
+            width: active ? 1.5 : 1,
           ),
-        ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                    color: active ? color.withOpacity(0.15) : AppTheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon,
+                      color: active ? color : AppTheme.textMuted, size: 22),
+                ),
+                Switch(
+                  value: active,
+                  onChanged: (_) => onTap(),
+                  activeColor: color,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(label,
+                style: TextStyle(
+                  color: active ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                )),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Container(
+                  width: 6, height: 6,
+                  decoration: BoxDecoration(
+                    color: active ? color : AppTheme.textMuted,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(sublabel,
+                    style: TextStyle(
+                      color: active ? color : AppTheme.textMuted,
+                      fontSize: 12,
+                    )),
+              ],
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 // ── Sensors Card ───────────────────────────────────────────────────────────────
@@ -319,18 +374,30 @@ class _SensorsCard extends StatelessWidget {
 
     if (!hasData) {
       return Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         decoration: SS.card(),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.sensors_off_rounded,
-                color: AppTheme.textMuted, size: 20),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Sem dados de sensores disponíveis.\nAguarda a ligação ao ESP32.',
-                style:
-                TextStyle(color: AppTheme.textMuted, fontSize: 13),
+            Container(
+              width: 44, height: 44,
+              decoration: SS.iconBox(color: AppTheme.textMuted),
+              child: const Icon(Icons.sensors_off_rounded,
+                  color: AppTheme.textMuted, size: 20),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Sem dados de sensores',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  SizedBox(height: 2),
+                  Text('Aguarda a ligação ao ESP32.',
+                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                ],
               ),
             ),
           ],
@@ -339,44 +406,30 @@ class _SensorsCard extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: SS.card(),
       child: Column(
         children: [
           if (zone.temperature != null)
-            _SensorRow(
-              icon: Icons.thermostat_rounded,
-              label: 'Temperatura',
-              value: '${zone.temperature!.toStringAsFixed(1)}°C',
-              color: AppTheme.warning,
-            ),
+            _SensorRow(icon: Icons.thermostat_rounded, label: 'Temperatura',
+                value: '${zone.temperature!.toStringAsFixed(1)}°C', color: AppTheme.warning),
           if (zone.humidity != null) ...[
-            const SizedBox(height: 12),
-            _SensorRow(
-              icon: Icons.water_drop_rounded,
-              label: 'Humidade',
-              value: '${zone.humidity!.toStringAsFixed(0)}%',
-              color: AppTheme.accent,
-            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            _SensorRow(icon: Icons.water_drop_rounded, label: 'Humidade',
+                value: '${zone.humidity!.toStringAsFixed(0)}%', color: AppTheme.accent),
           ],
           if (zone.luminosity != null) ...[
-            const SizedBox(height: 12),
-            _SensorRow(
-              icon: Icons.wb_sunny_rounded,
-              label: 'Luminosidade',
-              value: '${zone.luminosity!.toStringAsFixed(0)} lx',
-              color: AppTheme.warning,
-            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            _SensorRow(icon: Icons.wb_sunny_rounded, label: 'Luminosidade',
+                value: '${zone.luminosity!.toStringAsFixed(0)} lx',
+                color: const Color(0xFFFFB830)),
           ],
           if (zone.motionDetected != null) ...[
-            const SizedBox(height: 12),
+            const Divider(height: 1, indent: 16, endIndent: 16),
             _SensorRow(
               icon: Icons.motion_photos_on_rounded,
               label: 'Movimento',
               value: zone.motionDetected! ? 'Detetado' : 'Sem movimento',
-              color: zone.motionDetected!
-                  ? AppTheme.success
-                  : AppTheme.textMuted,
+              color: zone.motionDetected! ? AppTheme.success : AppTheme.textMuted,
             ),
           ],
         ],
@@ -392,32 +445,27 @@ class _SensorRow extends StatelessWidget {
   final Color color;
 
   const _SensorRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
+    required this.icon, required this.label,
+    required this.value, required this.color,
   });
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Container(
-        width: 36, height: 36,
-        decoration: SS.iconBox(color: color),
-        child: Icon(icon, color: color, size: 18),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: Text(label,
-            style: const TextStyle(
-                color: AppTheme.textSecondary, fontSize: 14)),
-      ),
-      Text(value,
-          style: TextStyle(
-              color: color,
-              fontSize: 15,
-              fontWeight: FontWeight.w700)),
-    ],
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    child: Row(
+      children: [
+        Container(
+          width: 38, height: 38,
+          decoration: SS.iconBox(color: color),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 14),
+        Expanded(child: Text(label,
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14))),
+        Text(value,
+            style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w800)),
+      ],
+    ),
   );
 }
 
@@ -434,12 +482,12 @@ class _OtherZoneRow extends StatelessWidget {
     child: Row(
       children: [
         Container(
-          padding: const EdgeInsets.all(8),
+          width: 42, height: 42,
           decoration: BoxDecoration(
             color: zone.color.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(zone.icon, color: zone.color, size: 18),
+          child: Icon(zone.icon, color: zone.color, size: 20),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -451,10 +499,16 @@ class _OtherZoneRow extends StatelessWidget {
                       color: AppTheme.textPrimary,
                       fontSize: 14,
                       fontWeight: FontWeight.w600)),
-              Text(
-                '${zone.occupantCount} ocupante${zone.occupantCount != 1 ? "s" : ""}',
-                style: const TextStyle(
-                    color: AppTheme.textMuted, fontSize: 12),
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  const Icon(Icons.people_rounded, size: 12, color: AppTheme.textMuted),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${zone.occupantCount} ocupante${zone.occupantCount != 1 ? "s" : ""}',
+                    style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  ),
+                ],
               ),
             ],
           ),
