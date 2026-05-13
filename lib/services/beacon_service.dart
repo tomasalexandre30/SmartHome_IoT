@@ -41,19 +41,18 @@ class BeaconService extends ChangeNotifier {
     _rssiHistory.clear();
 
     for (final b in beacons) {
-      final macKey = _norm(b.mac);
+      final macKey  = _norm(b.mac);
       final uuidKey = _norm(b.uuid);
       final nameKey = _norm(b.name);
 
-      _registry[macKey] = b;
+      _registry[macKey]  = b;
       _registry[uuidKey] = b;
       _registry[nameKey] = b;
 
-      // Chave interna por MAC para evitar sobrescrever beacons com o mesmo UUID
       _beacons[macKey] = b;
     }
 
-    notifyListeners();
+    // Não chama notifyListeners aqui — não há mudança de zona
   }
 
   Future<bool> _requestPermissions() async {
@@ -72,20 +71,18 @@ class BeaconService extends ChangeNotifier {
     if (_scanning) return;
 
     final granted = await _requestPermissions();
-
     if (!granted) {
       debugLog.add('ERRO: permissões BLE/localização não concedidas');
       debugPrint('[BLE ERROR] Permissões BLE/localização não concedidas');
-      notifyListeners();
+      notifyListeners(); // OK: muda estado de scanning
       return;
     }
 
     final adapterState = await FlutterBluePlus.adapterState.first;
-
     if (adapterState != BluetoothAdapterState.on) {
       debugLog.add('ERRO: Bluetooth desligado');
       debugPrint('[BLE ERROR] Bluetooth desligado');
-      notifyListeners();
+      notifyListeners(); // OK: muda estado de scanning
       return;
     }
 
@@ -96,13 +93,12 @@ class BeaconService extends ChangeNotifier {
       onError: (e) {
         debugLog.add('ERRO SCAN: $e');
         debugPrint('[BLE ERROR] $e');
-        notifyListeners();
       },
     );
 
     _scanning = true;
     debugLog.clear();
-    notifyListeners();
+    notifyListeners(); // OK: _scanning mudou
 
     _startScanCycle();
 
@@ -123,29 +119,23 @@ class BeaconService extends ChangeNotifier {
 
   Future<void> _startScanCycle() async {
     _scanCycleTimer?.cancel();
-
     await _runOneScanCycle();
-
     _scanCycleTimer = Timer.periodic(
       const Duration(seconds: 5),
           (_) async {
-        if (_scanning) {
-          await _runOneScanCycle();
-        }
+        if (_scanning) await _runOneScanCycle();
       },
     );
   }
 
   Future<void> _runOneScanCycle() async {
     if (!_scanning) return;
-
     try {
       await FlutterBluePlus.stopScan();
       _isScanningNow = false;
-      notifyListeners();
+      // ✅ NÃO notifica aqui — _isScanningNow não é relevante para os listeners de zona
 
       await Future.delayed(const Duration(milliseconds: 300));
-
       if (!_scanning) return;
 
       await FlutterBluePlus.startScan(
@@ -153,15 +143,13 @@ class BeaconService extends ChangeNotifier {
         androidUsesFineLocation: true,
         continuousUpdates: true,
       );
-
       _isScanningNow = true;
-      notifyListeners();
+      // ✅ NÃO notifica aqui — _isScanningNow não é relevante para os listeners de zona
 
       debugPrint('[BLE] Ciclo de scan iniciado');
     } catch (e) {
       debugPrint('[BLE ERROR] Erro no ciclo de scan: $e');
       debugLog.add('ERRO CICLO SCAN: $e');
-      notifyListeners();
     }
   }
 
@@ -183,14 +171,16 @@ class BeaconService extends ChangeNotifier {
 
     await FlutterBluePlus.stopScan();
 
-    notifyListeners();
+    notifyListeners(); // OK: _scanning mudou para false
   }
 
   void _onScanResults(List<ScanResult> results) {
+    bool updated = false;
+
     for (final r in results) {
-      final name = _norm(r.device.platformName);
+      final name      = _norm(r.device.platformName);
       final localName = _norm(r.advertisementData.advName);
-      final mac = _norm(r.device.remoteId.str);
+      final mac       = _norm(r.device.remoteId.str);
 
       final serviceUuids = r.advertisementData.serviceUuids
           .map((e) => _norm(e.str))
@@ -200,47 +190,34 @@ class BeaconService extends ChangeNotifier {
       _extractIBeaconUuid(r.advertisementData.manufacturerData);
 
       Beacon? matched;
-
-      // 1. MAC primeiro
       matched = _registry[mac];
-
-      // 2. UUID iBeacon
       if (matched == null && iBeaconUuid != null) {
         matched = _registry[_norm(iBeaconUuid)];
       }
-
-      // 3. Service UUIDs
       for (final uuid in serviceUuids) {
         matched ??= _registry[uuid];
       }
-
-      // 4. Nome como fallback
       matched ??= _registry[name];
       matched ??= _registry[localName];
 
-      // Ignora tudo o que não seja teu
       if (matched == null) continue;
 
       final beaconKey = _norm(matched.mac);
-
       final logEntry =
           'BEACON=${matched.name} | MAC=$mac | UUID=${iBeaconUuid ?? matched.uuid} | RSSI=${r.rssi}';
 
       debugPrint('[BLE MATCH] $logEntry');
-
       if (debugLog.length < 100 && !debugLog.contains(logEntry)) {
         debugLog.add(logEntry);
       }
 
       _rssiHistory.putIfAbsent(beaconKey, () => []);
       _rssiHistory[beaconKey]!.add(r.rssi);
-
       if (_rssiHistory[beaconKey]!.length > _smoothingWindow) {
         _rssiHistory[beaconKey]!.removeAt(0);
       }
 
-      final smoothed =
-      (_rssiHistory[beaconKey]!.reduce((a, b) => a + b) /
+      final smoothed = (_rssiHistory[beaconKey]!.reduce((a, b) => a + b) /
           _rssiHistory[beaconKey]!.length)
           .round();
 
@@ -249,9 +226,17 @@ class BeaconService extends ChangeNotifier {
         distance: _estimateDistance(smoothed),
         lastSeen: DateTime.now(),
       );
+      updated = true;
     }
 
-    notifyListeners();
+    // ✅ NÃO notifica aqui — atualização de RSSI não muda zona
+    // A zona é avaliada pelo _zoneTimer a cada 2s
+    // Isto elimina dezenas de notificações por segundo
+    if (updated) {
+      // Só avalia se recebemos dados novos — mas SEM notificar listeners ainda
+      // A notificação só acontece dentro de _evaluateZone se a zona mudar
+      _evaluateZoneInternal();
+    }
   }
 
   void _removeStaleBeacons() {
@@ -260,47 +245,31 @@ class BeaconService extends ChangeNotifier {
 
     _beacons.updateAll((key, beacon) {
       final secondsSinceSeen = now.difference(beacon.lastSeen).inSeconds;
-
       if (secondsSinceSeen > 6 && beacon.rssi != -100) {
         changed = true;
-
-        return beacon.copyWith(
-          rssi: -100,
-          distance: 99.0,
-          lastSeen: beacon.lastSeen,
-        );
+        return beacon.copyWith(rssi: -100, distance: 99.0, lastSeen: beacon.lastSeen);
       }
-
       return beacon;
     });
 
     if (changed) {
+      // Stale beacons podem mudar a zona — avalia mas só notifica se zona mudar
       _evaluateZone();
-      notifyListeners();
     }
+    // ✅ NÃO chama notifyListeners() indiscriminadamente aqui
   }
 
-  String? _extractIBeaconUuid(Map<int, List<int>> manufacturerData) {
-    final appleData = manufacturerData[0x004C];
-
-    if (appleData == null || appleData.length < 18) return null;
-
-    if (appleData[0] != 0x02 || appleData[1] != 0x15) return null;
-
-    final uuidBytes = appleData.sublist(2, 18);
-
-    final hex = uuidBytes
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
-
-    return '${hex.substring(0, 8)}-'
-        '${hex.substring(8, 12)}-'
-        '${hex.substring(12, 16)}-'
-        '${hex.substring(16, 20)}-'
-        '${hex.substring(20, 32)}';
+  /// Versão interna: avalia zona mas NÃO notifica (chamada do _onScanResults)
+  void _evaluateZoneInternal() {
+    _evaluateZoneImpl(notify: false);
   }
 
+  /// Versão pública: avalia zona e notifica se mudar (chamada pelo timer e stale)
   void _evaluateZone() {
+    _evaluateZoneImpl(notify: true);
+  }
+
+  void _evaluateZoneImpl({required bool notify}) {
     final nearby = _beacons.values.where((b) => b.isNearby).toList()
       ..sort((a, b) => b.rssi.compareTo(a.rssi));
 
@@ -311,12 +280,11 @@ class BeaconService extends ChangeNotifier {
             DateTime.now().difference(b.lastSeen).inSeconds < 10,
       );
 
-      if (!currentBeaconStillRecent) {
+      if (!currentBeaconStillRecent && _currentZoneId != null) {
         _currentZoneId = null;
-        debugPrint('[BLE ZONE] Zona atual: $_currentZoneId');
-        notifyListeners();
+        debugPrint('[BLE ZONE] Zona atual: null');
+        notifyListeners(); // ✅ Zona mudou → notifica
       }
-
       return;
     }
 
@@ -326,7 +294,7 @@ class BeaconService extends ChangeNotifier {
     if (_currentZoneId == null) {
       _currentZoneId = newZone;
       debugPrint('[BLE ZONE] Zona atual: $_currentZoneId');
-      notifyListeners();
+      notifyListeners(); // ✅ Zona mudou → notifica
       return;
     }
 
@@ -336,30 +304,41 @@ class BeaconService extends ChangeNotifier {
     if (currentBeacon == null) {
       _currentZoneId = newZone;
       debugPrint('[BLE ZONE] Zona atual: $_currentZoneId');
-      notifyListeners();
+      notifyListeners(); // ✅ Zona mudou → notifica
       return;
     }
 
     const int switchMarginDb = 8;
-
     if (newZone != _currentZoneId &&
         strongest.rssi > currentBeacon.rssi + switchMarginDb) {
       _currentZoneId = newZone;
       debugPrint('[BLE ZONE] Zona atual: $_currentZoneId');
-      notifyListeners();
+      notifyListeners(); // ✅ Zona mudou → notifica
     }
+    // ✅ Se a zona NÃO mudou, não notifica — evita spam de listeners
+  }
+
+  String? _extractIBeaconUuid(Map<int, List<int>> manufacturerData) {
+    final appleData = manufacturerData[0x004C];
+    if (appleData == null || appleData.length < 18) return null;
+    if (appleData[0] != 0x02 || appleData[1] != 0x15) return null;
+
+    final uuidBytes = appleData.sublist(2, 18);
+    final hex =
+    uuidBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+    return '${hex.substring(0, 8)}-'
+        '${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-'
+        '${hex.substring(16, 20)}-'
+        '${hex.substring(20, 32)}';
   }
 
   double _estimateDistance(int rssi) {
     if (rssi == 0 || rssi <= -100) return 99.0;
-
     const txPower = -59;
     final ratio = rssi / txPower;
-
-    if (ratio < 1.0) {
-      return pow(ratio, 10).toDouble();
-    }
-
+    if (ratio < 1.0) return pow(ratio, 10).toDouble();
     return 0.89976 * pow(ratio, 7.7095) + 0.111;
   }
 
@@ -371,18 +350,15 @@ class BeaconService extends ChangeNotifier {
   void injectMockReading(String beaconMac, int rssi) {
     final beaconKey = _norm(beaconMac);
     final b = _beacons[beaconKey];
-
     if (b == null) return;
 
     _rssiHistory.putIfAbsent(beaconKey, () => []);
     _rssiHistory[beaconKey]!.add(rssi);
-
     if (_rssiHistory[beaconKey]!.length > _smoothingWindow) {
       _rssiHistory[beaconKey]!.removeAt(0);
     }
 
-    final smoothed =
-    (_rssiHistory[beaconKey]!.reduce((a, b) => a + b) /
+    final smoothed = (_rssiHistory[beaconKey]!.reduce((a, b) => a + b) /
         _rssiHistory[beaconKey]!.length)
         .round();
 

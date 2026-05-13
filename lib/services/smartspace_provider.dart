@@ -87,13 +87,33 @@ class SmartSpaceProvider extends ChangeNotifier {
         temperature: (d['temperature'] as num?)?.toDouble(),
         humidity: (d['humidity'] as num?)?.toDouble(),
         motionDetected: d['motionDetected'] as bool?,
-        // ✅ FIX: presentUsers vem da RTDB como UIDs
         presentUsers: d['presentUsers'] != null
             ? List<String>.from(
             (d['presentUsers'] as Map).keys.map((k) => k.toString()))
             : [],
+        esp32Online: d['esp32Online'] as bool? ?? false,
       );
     }).toList();
+  }
+
+  void reevaluateEsp32Status() {
+    if (_db == null) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    bool changed = false;
+
+    _zones = _zones.map((z) {
+      final lastMs = _db!.lastUpdatedCache[z.id] ?? 0;
+      final shouldBeOnline = lastMs > 0 && (now - lastMs) < 30000;
+
+      if (z.esp32Online != shouldBeOnline) {
+        changed = true;
+        debugPrint('[SS] ${z.name} ESP32: ${z.esp32Online} → $shouldBeOnline');
+        return z.copyWith(esp32Online: shouldBeOnline);
+      }
+      return z;
+    }).toList();
+
+    if (changed) notifyListeners();
   }
 
   ZoneStatus _parseStatus(String s) {
@@ -109,7 +129,17 @@ class SmartSpaceProvider extends ChangeNotifier {
     catch (_) { return null; }
   }
 
-  // ✅ FIX: usa _uid em vez de _displayName para presentUsers
+  // ── ZONA TRACKING — OPERAÇÕES ATÓMICAS ─────────────────────────────────────
+  //
+  // ANTES: lia presentUsers do estado LOCAL e fazia SET completo → race condition
+  //        quando o stream RTDB não tinha chegado ainda com o estado mais recente.
+  //
+  // AGORA: vai direto ao RTDB com operações path-by-path atómicas:
+  //   saída  → remove  presentUsers/{uid}  + decrementa count
+  //   entrada → adiciona presentUsers/{uid} + incrementa count
+  //
+  // Isto elimina o "utilizador preso" porque nunca lemos estado local stale.
+
   void updateZoneFromBeacon(String? zoneId) {
     if (zoneId == _currentZoneId) return;
     if (_uid == null) return;
@@ -118,31 +148,13 @@ class SmartSpaceProvider extends ChangeNotifier {
     _currentZoneId = zoneId;
 
     if (prev != null) {
-      final prevZone = zoneById(prev);
-      final prevUids = [...?prevZone?.presentUsers]..remove(_uid);
-      final newCount = prevUids.length;
-
-      _updateZone(prev, (z) => z.copyWith(
-        status: newCount <= 0 ? ZoneStatus.free : ZoneStatus.occupied,
-        occupantCount: newCount,
-        presentUsers: prevUids,
-      ));
-
+      // Saída: operação atómica no RTDB — não usa estado local
       if (_isConnected) {
-        _db?.updateZoneOccupancy(
-          prev,
-          newCount <= 0 ? 'free' : 'occupied',
-          newCount,
-          prevUids,
-        );
-        _db?.updateUserZone(_uid!, null);
+        _db?.removeUserFromZoneAtomic(_uid!, prev);
+        _db?.updateUserZone(_uid!, zoneId); // atualiza para a nova (ou null)
       } else {
-        _pendingCommands.add(() => _db?.updateZoneOccupancy(
-          prev,
-          newCount <= 0 ? 'free' : 'occupied',
-          newCount,
-          prevUids,
-        ));
+        _pendingCommands.add(() => _db?.removeUserFromZoneAtomic(_uid!, prev));
+        _pendingCommands.add(() => _db?.updateUserZone(_uid!, zoneId));
       }
 
       _log(LogEvent(
@@ -158,24 +170,19 @@ class SmartSpaceProvider extends ChangeNotifier {
     }
 
     if (zoneId != null) {
-      final newZone = zoneById(zoneId);
-      // ✅ FIX: adiciona o UID, não o displayName
-      final newUids = [...?newZone?.presentUsers];
-      if (!newUids.contains(_uid)) newUids.add(_uid!);
-      final newCount = newUids.length;
-
-      _updateZone(zoneId, (z) => z.copyWith(
-        status: ZoneStatus.occupied,
-        occupantCount: newCount,
-        presentUsers: newUids,
-      ));
-
+      // Entrada: operação atómica no RTDB — não usa estado local
       if (_isConnected) {
-        _db?.updateZoneOccupancy(zoneId, 'occupied', newCount, newUids);
-        _db?.updateUserZone(_uid!, zoneId);
+        _db?.addUserToZoneAtomic(_uid!, zoneId);
+        if (prev == null) {
+          // Só chama updateUserZone aqui se não havia zona anterior
+          // (se havia, já foi chamado no bloco de saída acima)
+          _db?.updateUserZone(_uid!, zoneId);
+        }
       } else {
-        _pendingCommands.add(() =>
-            _db?.updateZoneOccupancy(zoneId, 'occupied', newCount, newUids));
+        _pendingCommands.add(() => _db?.addUserToZoneAtomic(_uid!, zoneId));
+        if (prev == null) {
+          _pendingCommands.add(() => _db?.updateUserZone(_uid!, zoneId));
+        }
       }
 
       _log(LogEvent(
@@ -202,21 +209,17 @@ class SmartSpaceProvider extends ChangeNotifier {
     _zones = _zones.map((z) => z.id == id ? fn(z) : z).toList();
   }
 
-  // ✅ FIX: usa removeUserFromZone (path nested) em vez de updateZoneOccupancy
   Future<void> clearZoneOnLogout() async {
     if (_uid == null) return;
-
     final prev = _currentZoneId;
     _currentZoneId = null;
 
     if (prev != null) {
       final prevZone = zoneById(prev);
-
       if (_isConnected && _db != null) {
-        await _db!.removeUserFromZone(_uid!, prev);
+        await _db!.removeUserFromZoneAtomic(_uid!, prev);
         await _db!.updateUserZone(_uid!, null);
       }
-
       _log(LogEvent(
         id: _uid_(),
         type: LogEventType.zoneExit,
@@ -231,7 +234,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     _zonesSub?.cancel();
     _zonesSub = null;
     _pendingCommands.clear();
-
     notifyListeners();
   }
 
@@ -239,16 +241,12 @@ class SmartSpaceProvider extends ChangeNotifier {
     final z = zoneById(zoneId);
     if (z == null) return;
     final newState = !z.lightOn;
-
     _updateZone(zoneId, (z) => z.copyWith(lightOn: newState));
-
     if (_isConnected) {
       _db?.updateZoneLight(zoneId, newState, z.lightIntensity);
     } else {
-      _pendingCommands.add(
-              () => _db?.updateZoneLight(zoneId, newState, z.lightIntensity));
+      _pendingCommands.add(() => _db?.updateZoneLight(zoneId, newState, z.lightIntensity));
     }
-
     _log(LogEvent(
       id: _uid_(),
       type: LogEventType.manualCommand,
@@ -266,7 +264,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     final z = zoneById(zoneId);
     if (z == null) return;
     _updateZone(zoneId, (z) => z.copyWith(lightIntensity: value));
-
     if (_isConnected) {
       _db?.updateZoneLight(zoneId, z.lightOn, value);
     } else {
@@ -279,15 +276,12 @@ class SmartSpaceProvider extends ChangeNotifier {
     final z = zoneById(zoneId);
     if (z == null) return;
     final newState = !z.buzzerOn;
-
     _updateZone(zoneId, (z) => z.copyWith(buzzerOn: newState));
-
     if (_isConnected) {
       _db?.updateZoneBuzzer(zoneId, newState);
     } else {
       _pendingCommands.add(() => _db?.updateZoneBuzzer(zoneId, newState));
     }
-
     _log(LogEvent(
       id: _uid_(),
       type: LogEventType.manualCommand,
@@ -301,33 +295,26 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void injectSensorData(String zoneId, {
-    double? luminosity,
-    double? temperature,
-    double? humidity,
-    bool? motion,
-  }) {
+  void injectSensorData(String zoneId,
+      {double? luminosity, double? temperature, double? humidity, bool? motion}) {
     _updateZone(zoneId, (z) => z.copyWith(
       luminosity: luminosity ?? z.luminosity,
       temperature: temperature ?? z.temperature,
       humidity: humidity ?? z.humidity,
       motionDetected: motion ?? z.motionDetected,
     ));
-
     if (_isConnected) {
       _db?.updateZoneSensors(zoneId,
-        luminosity: luminosity,
-        temperature: temperature,
-        humidity: humidity,
-        motionDetected: motion,
-      );
+          luminosity: luminosity,
+          temperature: temperature,
+          humidity: humidity,
+          motionDetected: motion);
     } else {
       _pendingCommands.add(() => _db?.updateZoneSensors(zoneId,
-        luminosity: luminosity,
-        temperature: temperature,
-        humidity: humidity,
-        motionDetected: motion,
-      ));
+          luminosity: luminosity,
+          temperature: temperature,
+          humidity: humidity,
+          motionDetected: motion));
     }
     notifyListeners();
   }
@@ -337,10 +324,7 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   void updatePreferences(UserPreferences prefs) {
     _preferences[prefs.zoneId] = prefs;
-    if (_db != null && _uid != null) {
-      _db!.savePreferences(_uid!, prefs);
-    }
-
+    if (_db != null && _uid != null) _db!.savePreferences(_uid!, prefs);
     _prefsLogTimer?.cancel();
     _prefsLogTimer = Timer(const Duration(seconds: 1), () {
       _log(LogEvent(
@@ -358,31 +342,23 @@ class SmartSpaceProvider extends ChangeNotifier {
       ));
       notifyListeners();
     });
-
     notifyListeners();
   }
 
   void _applyPreferences(String zoneId) {
     final prefs = _preferences[zoneId];
     if (prefs == null) return;
-    _updateZone(zoneId, (z) => z.copyWith(
-      lightOn: true,
-      lightIntensity: prefs.lightIntensity,
-    ));
-
+    _updateZone(zoneId, (z) => z.copyWith(lightOn: true, lightIntensity: prefs.lightIntensity));
     if (_isConnected) {
       _db?.updateZoneLight(zoneId, true, prefs.lightIntensity);
     } else {
-      _pendingCommands.add(
-              () => _db?.updateZoneLight(zoneId, true, prefs.lightIntensity));
+      _pendingCommands.add(() => _db?.updateZoneLight(zoneId, true, prefs.lightIntensity));
     }
-
     _log(LogEvent(
       id: _uid_(),
       type: LogEventType.automationTrigger,
       zoneId: zoneId,
-      message: 'Preferências de $_displayName aplicadas na '
-          '${zoneById(zoneId)?.name ?? zoneId}',
+      message: 'Preferências de $_displayName aplicadas na ${zoneById(zoneId)?.name ?? zoneId}',
       userName: _displayName,
       userRole: _appUser?.role.name ?? 'user',
       uid: _uid ?? '',
@@ -424,27 +400,18 @@ class SmartSpaceProvider extends ChangeNotifier {
     switch (rule.action) {
       case 'light_on':
         _updateZone(zoneId, (z) => z.copyWith(lightOn: true));
-        if (_isConnected) {
-          _db?.updateZoneLight(zoneId, true, 1.0);
-        } else {
-          _pendingCommands.add(() => _db?.updateZoneLight(zoneId, true, 1.0));
-        }
+        if (_isConnected) { _db?.updateZoneLight(zoneId, true, 1.0); }
+        else { _pendingCommands.add(() => _db?.updateZoneLight(zoneId, true, 1.0)); }
         break;
       case 'light_off':
         _updateZone(zoneId, (z) => z.copyWith(lightOn: false));
-        if (_isConnected) {
-          _db?.updateZoneLight(zoneId, false, 0.0);
-        } else {
-          _pendingCommands.add(() => _db?.updateZoneLight(zoneId, false, 0.0));
-        }
+        if (_isConnected) { _db?.updateZoneLight(zoneId, false, 0.0); }
+        else { _pendingCommands.add(() => _db?.updateZoneLight(zoneId, false, 0.0)); }
         break;
       case 'buzzer':
         _updateZone(zoneId, (z) => z.copyWith(buzzerOn: true));
-        if (_isConnected) {
-          _db?.updateZoneBuzzer(zoneId, true);
-        } else {
-          _pendingCommands.add(() => _db?.updateZoneBuzzer(zoneId, true));
-        }
+        if (_isConnected) { _db?.updateZoneBuzzer(zoneId, true); }
+        else { _pendingCommands.add(() => _db?.updateZoneBuzzer(zoneId, true)); }
         break;
     }
     _log(LogEvent(
@@ -462,13 +429,11 @@ class SmartSpaceProvider extends ChangeNotifier {
   void setConnected(bool v) {
     if (_isConnected == v) return;
     _isConnected = v;
-
     if (v && _pendingCommands.isNotEmpty) {
       debugPrint('[SS] Sincronizando ${_pendingCommands.length} comandos pendentes...');
       for (final cmd in _pendingCommands) cmd();
       _pendingCommands.clear();
     }
-
     _log(LogEvent(
       id: _uid_(),
       type: v ? LogEventType.connectionRestored : LogEventType.connectionLost,

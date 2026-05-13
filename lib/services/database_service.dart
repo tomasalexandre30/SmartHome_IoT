@@ -1,22 +1,30 @@
-import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_database/firebase_database.dart' as rtdb;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 
 class DatabaseService extends ChangeNotifier {
-  final FirebaseDatabase _db = FirebaseDatabase.instanceFor(
-    app: FirebaseDatabase.instance.app,
-    databaseURL: 'https://smartspaceiot-default-rtdb.europe-west1.firebasedatabase.app',
+  final rtdb.FirebaseDatabase _db = rtdb.FirebaseDatabase.instanceFor(
+    app: rtdb.FirebaseDatabase.instance.app,
+    databaseURL:
+    'https://smartspaceiot-default-rtdb.europe-west1.firebasedatabase.app',
   );
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool _connected = false;
   bool get connected => _connected;
 
-  DatabaseReference _zonesRef() => _db.ref('smartspace/zones');
-  DatabaseReference _zoneRef(String id) => _db.ref('smartspace/zones/$id');
-  DatabaseReference _userRef(String uid) => _db.ref('smartspace/users/$uid');
+  final Map<String, int> lastUpdatedCache = {};
+  final Map<String, String> _displayNameCache = {};
+  Map<String, String> get displayNameCache => Map.unmodifiable(_displayNameCache);
+
+  rtdb.DatabaseReference _zonesRef() => _db.ref('smartspace/zones');
+  rtdb.DatabaseReference _zoneRef(String id) => _db.ref('smartspace/zones/$id');
+  rtdb.DatabaseReference _userRef(String uid) => _db.ref('smartspace/users/$uid');
   CollectionReference _logsRef() => _firestore.collection('logs');
+
+  String _safeUidLabel(String uid) =>
+      uid.length >= 6 ? uid.substring(0, 6) : uid;
 
   Future<void> initialize(String uid) async {
     await _initializeZones();
@@ -56,16 +64,30 @@ class DatabaseService extends ChangeNotifier {
     'humidity': zone.humidity,
     'motionDetected': zone.motionDetected,
     'energyUsageWh': zone.energyUsageWh,
-    'lastUpdated': ServerValue.timestamp,
+    'lastUpdated': rtdb.ServerValue.timestamp,
+    'esp32Online': false,
+    'esp32LastSeen': 0,
   };
 
   Stream<List<ZoneUpdate>> zonesStream() {
     return _zonesRef().onValue.map((event) {
       if (!event.snapshot.exists) return [];
       final data = event.snapshot.value as Map<dynamic, dynamic>;
+      final now = DateTime.now().millisecondsSinceEpoch;
+
       return data.entries.map((e) {
+        final zoneId = e.key as String;
         final zoneData = Map<String, dynamic>.from(e.value as Map);
-        return ZoneUpdate(zoneId: e.key as String, data: zoneData);
+
+        final esp32LastSeen = zoneData['esp32LastSeen'];
+        final lastMs = esp32LastSeen is int ? esp32LastSeen : 0;
+        lastUpdatedCache[zoneId] = lastMs;
+
+        final esp32OnlineFlag = zoneData['esp32Online'] as bool? ?? false;
+        final isAlive = esp32OnlineFlag && (now - lastMs) < 30000;
+        zoneData['esp32Online'] = isAlive;
+
+        return ZoneUpdate(zoneId: zoneId, data: zoneData);
       }).toList();
     });
   }
@@ -75,7 +97,11 @@ class DatabaseService extends ChangeNotifier {
       await _zoneRef(zoneId).update({
         'lightOn': on,
         'lightIntensity': intensity,
-        'lastUpdated': ServerValue.timestamp,
+        'lastUpdated': rtdb.ServerValue.timestamp,
+      });
+      await _db.ref('smartspace/commands/$zoneId').update({
+        'lightOn': on,
+        'lightIntensity': intensity,
       });
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar luz: $e');
@@ -86,14 +112,133 @@ class DatabaseService extends ChangeNotifier {
     try {
       await _zoneRef(zoneId).update({
         'buzzerOn': on,
-        'lastUpdated': ServerValue.timestamp,
+        'lastUpdated': rtdb.ServerValue.timestamp,
       });
+      await _db.ref('smartspace/commands/$zoneId').update({'buzzerOn': on});
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar buzzer: $e');
     }
   }
 
-  // ✅ FIX: recebe uids separados — presentUsers guarda UIDs, não displayNames
+  // ── OPERAÇÕES ATÓMICAS COM TRANSACTION ─────────────────────────────────────
+
+  /// Adiciona um utilizador à zona usando Transaction atómica.
+  ///
+  /// NOTA CRÍTICA: quando presentUsers está vazio no RTDB, o Firebase
+  /// guarda-o como `null` (não como `{}`). O runTransaction recebe
+  /// currentData == null nesse caso. NÃO devemos fazer abort — devemos
+  /// tratar null como mapa vazio e adicionar o uid.
+  Future<void> addUserToZoneAtomic(String uid, String zoneId) async {
+    try {
+      final presentUsersRef = _zoneRef(zoneId).child('presentUsers');
+
+      final result = await presentUsersRef.runTransaction((currentData) {
+        // ✅ null significa nó vazio (Firebase remove nós com valor {})
+        // Nunca fazer abort em null — criar o mapa com o uid
+        final users = currentData != null
+            ? Map<String, dynamic>.from(currentData as Map)
+            : <String, dynamic>{};
+
+        if (users.containsKey(uid)) {
+          debugPrint('[DB] addTransaction: $uid já estava em $zoneId — abort');
+          return rtdb.Transaction.abort();
+        }
+
+        users[uid] = true;
+        debugPrint('[DB] addTransaction: adicionando $uid a $zoneId');
+        return rtdb.Transaction.success(users);
+      });
+
+      if (!result.committed) {
+        debugPrint('[DB] addUserAtomic: transaction não committed para $uid em $zoneId');
+        return;
+      }
+
+      // Transaction comprometida — atualiza count e status
+      final snap = await _zoneRef(zoneId).child('presentUsers').get();
+      final newCount = snap.exists && snap.value is Map
+          ? (snap.value as Map).length
+          : 1;
+
+      await _zoneRef(zoneId).update({
+        'occupantCount': newCount,
+        'status': 'occupied',
+        'lastUpdated': rtdb.ServerValue.timestamp,
+      });
+
+      debugPrint('[DB] addUserAtomic: $uid entrou em $zoneId → $newCount presentes');
+    } catch (e) {
+      debugPrint('[DB] Erro ao adicionar utilizador (transaction): $e');
+    }
+  }
+
+  /// Remove um utilizador da zona usando Transaction atómica.
+  Future<void> removeUserFromZoneAtomic(String uid, String zoneId) async {
+    try {
+      final presentUsersRef = _zoneRef(zoneId).child('presentUsers');
+
+      final result = await presentUsersRef.runTransaction((currentData) {
+        // null = zona já vazia, nada a remover
+        if (currentData == null) {
+          debugPrint('[DB] removeTransaction: presentUsers null em $zoneId — abort');
+          return rtdb.Transaction.abort();
+        }
+
+        final users = Map<String, dynamic>.from(currentData as Map);
+        if (!users.containsKey(uid)) {
+          debugPrint('[DB] removeTransaction: $uid não estava em $zoneId — abort');
+          return rtdb.Transaction.abort();
+        }
+
+        users.remove(uid);
+        // ✅ Se o mapa ficou vazio, retorna null explicitamente
+        // para o Firebase remover o nó (em vez de guardar {})
+        return rtdb.Transaction.success(users.isEmpty ? null : users);
+      });
+
+      if (!result.committed) {
+        return;
+      }
+
+      // Transaction comprometida — atualiza count e status
+      final snap = await _zoneRef(zoneId).child('presentUsers').get();
+      final remaining = snap.exists && snap.value is Map
+          ? (snap.value as Map).length
+          : 0;
+
+      await _zoneRef(zoneId).update({
+        'occupantCount': remaining,
+        'status': remaining == 0 ? 'free' : 'occupied',
+        'lastUpdated': rtdb.ServerValue.timestamp,
+      });
+
+      debugPrint('[DB] removeUserAtomic: $uid saiu de $zoneId → $remaining restantes');
+    } catch (e) {
+      debugPrint('[DB] Erro ao remover utilizador (transaction): $e');
+    }
+  }
+
+  /// Remove o uid de TODAS as zonas onde apareça.
+  Future<void> removeUserFromAllZones(String uid) async {
+    try {
+      final zonesSnap = await _zonesRef().get();
+      if (!zonesSnap.exists) return;
+
+      final zones = Map<String, dynamic>.from(zonesSnap.value as Map);
+      for (final entry in zones.entries) {
+        final zoneId = entry.key as String;
+        final zoneData = Map<String, dynamic>.from(entry.value as Map);
+        final presentUsers = zoneData['presentUsers'];
+
+        if (presentUsers is Map && presentUsers.containsKey(uid)) {
+          await removeUserFromZoneAtomic(uid, zoneId);
+        }
+      }
+    } catch (e) {
+      debugPrint('[DB] Erro ao remover utilizador de todas as zonas: $e');
+    }
+  }
+
   Future<void> updateZoneOccupancy(
       String zoneId, String status, int count, List<String> uids) async {
     try {
@@ -101,21 +246,24 @@ class DatabaseService extends ChangeNotifier {
         'status': status,
         'occupantCount': count,
         'presentUsers': {for (final uid in uids) uid: true},
-        'lastUpdated': ServerValue.timestamp,
+        'lastUpdated': rtdb.ServerValue.timestamp,
       });
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar ocupação: $e');
     }
   }
 
-  Future<void> updateZoneSensors(String zoneId, {
-    double? luminosity,
-    double? temperature,
-    double? humidity,
-    bool? motionDetected,
-  }) async {
+  Future<void> updateZoneSensors(
+      String zoneId, {
+        double? luminosity,
+        double? temperature,
+        double? humidity,
+        bool? motionDetected,
+      }) async {
     try {
-      final updates = <String, dynamic>{'lastUpdated': ServerValue.timestamp};
+      final updates = <String, dynamic>{
+        'lastUpdated': rtdb.ServerValue.timestamp,
+      };
       if (luminosity != null) updates['luminosity'] = luminosity;
       if (temperature != null) updates['temperature'] = temperature;
       if (humidity != null) updates['humidity'] = humidity;
@@ -126,76 +274,32 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ✅ FIX: ao fazer login, limpa uid de TODAS as zonas onde ainda apareça
   Future<void> _updateUserOnline(String uid) async {
     try {
-      final zonesSnap = await _zonesRef().get();
-      if (zonesSnap.exists) {
-        final zones = Map<String, dynamic>.from(zonesSnap.value as Map);
-        for (final entry in zones.entries) {
-          final zoneId = entry.key as String;
-          final zoneData = Map<String, dynamic>.from(entry.value as Map);
-          final presentUsers = zoneData['presentUsers'];
-
-          if (presentUsers is Map && presentUsers.containsKey(uid)) {
-            final currentCount = (zoneData['occupantCount'] as int? ?? 1);
-            final newCount = (currentCount - 1).clamp(0, 999);
-            await _zoneRef(zoneId).update({
-              'presentUsers/$uid': null,
-              'occupantCount': newCount,
-              'status': newCount == 0 ? 'free' : 'occupied',
-              'lastUpdated': ServerValue.timestamp,
-            });
-            debugPrint('[DB] Login cleanup: removido $uid de $zoneId ($currentCount→$newCount)');
-          }
-        }
-      }
+      await removeUserFromAllZones(uid);
 
       await _userRef(uid).update({
         'online': true,
-        'lastSeen': ServerValue.timestamp,
+        'lastSeen': rtdb.ServerValue.timestamp,
         'currentZoneId': null,
       });
 
-      // onDisconnect estático — cobre crash/perda de rede
       await _userRef(uid).onDisconnect().update({
         'online': false,
-        'lastSeen': ServerValue.timestamp,
+        'lastSeen': rtdb.ServerValue.timestamp,
         'currentZoneId': null,
       });
-
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar utilizador online: $e');
     }
   }
 
-  // ✅ FIX: remove uid da zona pelo path nested — não toca nos outros utilizadores
   Future<void> removeUserFromZone(String uid, String zoneId) async {
-    try {
-      final snap = await _zoneRef(zoneId).get();
-      if (!snap.exists) return;
-      final zoneData = Map<String, dynamic>.from(snap.value as Map);
-      final presentUsers = zoneData['presentUsers'];
-
-      if (presentUsers is Map && presentUsers.containsKey(uid)) {
-        final currentCount = (zoneData['occupantCount'] as int? ?? 1);
-        final newCount = (currentCount - 1).clamp(0, 999);
-        await _zoneRef(zoneId).update({
-          'presentUsers/$uid': null,
-          'occupantCount': newCount,
-          'status': newCount == 0 ? 'free' : 'occupied',
-          'lastUpdated': ServerValue.timestamp,
-        });
-        debugPrint('[DB] removeUserFromZone: $uid saiu de $zoneId ($currentCount→$newCount)');
-      }
-    } catch (e) {
-      debugPrint('[DB] Erro ao remover utilizador da zona: $e');
-    }
+    await removeUserFromZoneAtomic(uid, zoneId);
   }
 
   Future<void> updateUserZone(String uid, String? zoneId) async {
     try {
-      // Cancela onDisconnects anteriores de zonas
       for (final zone in DefaultData.zones()) {
         await _zoneRef(zone.id).child('presentUsers/$uid').onDisconnect().cancel();
         await _zoneRef(zone.id).onDisconnect().cancel();
@@ -203,31 +307,30 @@ class DatabaseService extends ChangeNotifier {
 
       await _userRef(uid).update({
         'currentZoneId': zoneId,
-        'lastSeen': ServerValue.timestamp,
+        'lastSeen': rtdb.ServerValue.timestamp,
       });
 
       if (zoneId != null) {
-        // Remove o uid do presentUsers ao desligar abruptamente
         await _zoneRef(zoneId).child('presentUsers/$uid').onDisconnect().remove();
 
-        // Regista onDisconnect com count decrementado
-        final snap = await _zoneRef(zoneId).child('occupantCount').get();
-        final currentCount = (snap.value as int? ?? 1);
-        final newCount = (currentCount - 1).clamp(0, 999);
+        final snap = await _zoneRef(zoneId).child('presentUsers').get();
+        final presentUsers = snap.exists && snap.value is Map
+            ? Map.from(snap.value as Map)
+            : <dynamic, dynamic>{};
+        final newCount = (presentUsers.length - 1).clamp(0, 999);
 
         await _zoneRef(zoneId).onDisconnect().update({
           'occupantCount': newCount,
           'status': newCount == 0 ? 'free' : 'occupied',
-          'lastUpdated': ServerValue.timestamp,
+          'lastUpdated': rtdb.ServerValue.timestamp,
         });
       }
 
       await _userRef(uid).onDisconnect().update({
         'online': false,
-        'lastSeen': ServerValue.timestamp,
+        'lastSeen': rtdb.ServerValue.timestamp,
         'currentZoneId': null,
       });
-
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar zona do utilizador: $e');
     }
@@ -253,8 +356,10 @@ class DatabaseService extends ChangeNotifier {
         final userData = Map<String, dynamic>.from(data[uid] as Map);
         try {
           final doc = await _firestore.collection('users').doc(uid).get();
-          final name = doc.data()?['displayName'] as String? ?? uid.substring(0, 6);
+          final name =
+              doc.data()?['displayName'] as String? ?? _safeUidLabel(uid);
           final role = doc.data()?['role'] as String? ?? 'user';
+          _displayNameCache[uid] = name;
           users.add(OnlineUser(
             uid: uid,
             currentZoneId: userData['currentZoneId'] as String?,
@@ -263,16 +368,31 @@ class DatabaseService extends ChangeNotifier {
             role: role,
           ));
         } catch (_) {
+          final fallback = _safeUidLabel(uid);
+          _displayNameCache[uid] = fallback;
           users.add(OnlineUser(
             uid: uid,
             currentZoneId: userData['currentZoneId'] as String?,
             online: true,
-            displayName: uid.substring(0, 6),
+            displayName: fallback,
           ));
         }
       }
       return users;
     });
+  }
+
+  Future<String> resolveDisplayName(String uid) async {
+    if (_displayNameCache.containsKey(uid)) return _displayNameCache[uid]!;
+    try {
+      final doc = await _firestore.collection('users').doc(uid).get();
+      final name =
+          doc.data()?['displayName'] as String? ?? _safeUidLabel(uid);
+      _displayNameCache[uid] = name;
+      return name;
+    } catch (_) {
+      return _safeUidLabel(uid);
+    }
   }
 
   Future<void> saveLog(LogEvent event, String uid, String role) async {
@@ -385,7 +505,7 @@ class DatabaseService extends ChangeNotifier {
     try {
       await _userRef(uid).update({
         'online': online,
-        'lastSeen': ServerValue.timestamp,
+        'lastSeen': rtdb.ServerValue.timestamp,
         if (!online) 'currentZoneId': null,
       });
     } catch (e) {
@@ -397,7 +517,7 @@ class DatabaseService extends ChangeNotifier {
     try {
       await _userRef(uid).update({
         'online': false,
-        'lastSeen': ServerValue.timestamp,
+        'lastSeen': rtdb.ServerValue.timestamp,
         'currentZoneId': null,
       });
     } catch (e) {

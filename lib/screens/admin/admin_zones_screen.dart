@@ -6,6 +6,11 @@ import '../../theme/app_theme.dart';
 import '../../widgets/widgets.dart';
 import '../../models/models.dart';
 import 'admin_zone_detail_screen.dart';
+import '../../services/database_service.dart';
+
+// ── Helper seguro para labels de UID ──────────────────────────────────────────
+String _safeUidLabel(String uid) =>
+    uid.length >= 6 ? uid.substring(0, 6) : uid;
 
 class AdminZonesScreen extends StatelessWidget {
   const AdminZonesScreen({super.key});
@@ -25,20 +30,16 @@ class AdminZonesScreen extends StatelessWidget {
                   ble.scanning
                       ? Icons.bluetooth_searching_rounded
                       : Icons.bluetooth_disabled_rounded,
-                  color: ble.scanning
-                      ? AppTheme.accent
-                      : AppTheme.textMuted,
+                  color: ble.scanning ? AppTheme.accent : AppTheme.textMuted,
                 ),
-                onPressed: () => ble.scanning
-                    ? ble.stopScanning()
-                    : ble.startScanning(),
+                onPressed: () =>
+                ble.scanning ? ble.stopScanning() : ble.startScanning(),
               ),
             ),
           ],
         ),
         body: ListView(
-          padding:
-          const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           children: [
             _ZonesSummary(zones: ss.zones),
             const SizedBox(height: 20),
@@ -63,18 +64,14 @@ class _ZonesSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final free =
-        zones.where((z) => z.status == ZoneStatus.free).length;
-    final occupied = zones
-        .where((z) => z.status == ZoneStatus.occupied)
-        .length;
-    final unknown = zones
-        .where((z) => z.status == ZoneStatus.unknown)
-        .length;
+    final free = zones.where((z) => z.status == ZoneStatus.free).length;
+    final occupied =
+        zones.where((z) => z.status == ZoneStatus.occupied).length;
+    final unknown =
+        zones.where((z) => z.status == ZoneStatus.unknown).length;
     final totalOccupants =
     zones.fold<int>(0, (s, z) => s + z.occupantCount);
-    final activeLights =
-        zones.where((z) => z.lightOn).length;
+    final activeLights = zones.where((z) => z.lightOn).length;
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -148,8 +145,7 @@ class _ZonesSummary extends StatelessWidget {
       width: 1,
       height: 36,
       color: AppTheme.border,
-      margin:
-      const EdgeInsets.symmetric(horizontal: 4));
+      margin: const EdgeInsets.symmetric(horizontal: 4));
 }
 
 class _SummaryItem extends StatelessWidget {
@@ -176,8 +172,8 @@ class _SummaryItem extends StatelessWidget {
               fontSize: 22,
               fontWeight: FontWeight.w800)),
       Text(label,
-          style: const TextStyle(
-              color: AppTheme.textMuted, fontSize: 9),
+          style:
+          const TextStyle(color: AppTheme.textMuted, fontSize: 9),
           textAlign: TextAlign.center),
     ],
   );
@@ -196,8 +192,7 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(
-        horizontal: 10, vertical: 5),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
       color: color.withOpacity(0.08),
       borderRadius: BorderRadius.circular(8),
@@ -250,63 +245,63 @@ class _ZoneCardState extends State<_ZoneCard>
   @override
   Widget build(BuildContext context) {
     final ss = context.watch<SmartSpaceProvider>();
+    final db = context.read<DatabaseService>();
     final z = ss.zoneById(widget.zone.id) ?? widget.zone;
-    final beacon = widget.ble.beacons
-        .where((b) => b.zoneId == z.id)
-        .firstOrNull;
+    final beacon =
+        widget.ble.beacons.where((b) => b.zoneId == z.id).firstOrNull;
     final occupancyPct = z.occupantCount / 10.0;
 
+    // ✅ Resolve UIDs para nomes aqui, na card, para usar também no header
+    String _resolveUid(String uid) =>
+        db.displayNameCache[uid] ?? _safeUidLabel(uid);
+
     return Container(
-      decoration:
-      SS.card(accentColor: _expanded ? z.color : null),
+      decoration: SS.card(accentColor: _expanded ? z.color : null),
       child: Column(
         children: [
           // ── Header ─────────────────────────────────────────
           InkWell(
-            onTap: () =>
-                setState(() => _expanded = !_expanded),
+            onTap: () => setState(() => _expanded = !_expanded),
             borderRadius: BorderRadius.circular(14),
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
                   Container(
-                    width: 44, height: 44,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: z.color.withOpacity(0.15),
-                      borderRadius:
-                      BorderRadius.circular(13),
+                      borderRadius: BorderRadius.circular(13),
                     ),
-                    child: Icon(z.icon,
-                        color: z.color, size: 22),
+                    child: Icon(z.icon, color: z.color, size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
                             Text(z.name,
                                 style: const TextStyle(
-                                    color:
-                                    AppTheme.textPrimary,
+                                    color: AppTheme.textPrimary,
                                     fontSize: 15,
-                                    fontWeight:
-                                    FontWeight.w700)),
+                                    fontWeight: FontWeight.w700)),
                             const SizedBox(width: 8),
                             ZoneStatusBadge(zone: z),
                           ],
                         ),
                         const SizedBox(height: 2),
                         Text(
+                          // ✅ Resolve UIDs para nomes também no subtítulo do header
                           z.presentUsers.isNotEmpty
-                              ? z.presentUsers.join(', ')
+                              ? z.presentUsers
+                              .map(_resolveUid)
+                              .join(', ')
                               : '${z.occupantCount} ocupante${z.occupantCount != 1 ? "s" : ""}',
                           style: const TextStyle(
-                              color: AppTheme.textMuted,
-                              fontSize: 11),
+                              color: AppTheme.textMuted, fontSize: 11),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -331,8 +326,7 @@ class _ZoneCardState extends State<_ZoneCard>
                             : Icons.volume_off_rounded,
                         active: z.buzzerOn,
                         color: AppTheme.error,
-                        onTap: () =>
-                            ss.toggleBuzzer(z.id),
+                        onTap: () => ss.toggleBuzzer(z.id),
                         size: 32,
                       ),
                       const SizedBox(width: 6),
@@ -352,8 +346,7 @@ class _ZoneCardState extends State<_ZoneCard>
 
           // ── Barra de ocupação ───────────────────────────────
           Padding(
-            padding:
-            const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
             child: Row(
               children: [
                 Expanded(
@@ -376,8 +369,7 @@ class _ZoneCardState extends State<_ZoneCard>
                 const SizedBox(width: 8),
                 Text('${z.occupantCount}/10',
                     style: const TextStyle(
-                        color: AppTheme.textMuted,
-                        fontSize: 10)),
+                        color: AppTheme.textMuted, fontSize: 10)),
               ],
             ),
           ),
@@ -430,10 +422,7 @@ class _ZoneCardState extends State<_ZoneCard>
 
           // ── BLE info ────────────────────────────────────────
           if (beacon != null && beacon.isNearby)
-            BleInfoBar(
-              beacon: beacon,
-              showDistance: _expanded,
-            ),
+            BleInfoBar(beacon: beacon, showDistance: _expanded),
         ],
       ),
     );
@@ -450,6 +439,8 @@ class _ControloTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final db = context.read<DatabaseService>();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -485,23 +476,19 @@ class _ControloTab extends StatelessWidget {
           if (zone.lightOn) ...[
             const SizedBox(height: 12),
             Container(
-              padding:
-              const EdgeInsets.fromLTRB(14, 12, 14, 4),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
               decoration: SS.card(),
               child: Column(
                 children: [
                   Row(
                     children: [
-                      const Icon(
-                          Icons.brightness_6_rounded,
-                          color: AppTheme.warning,
-                          size: 16),
+                      const Icon(Icons.brightness_6_rounded,
+                          color: AppTheme.warning, size: 16),
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Text('Intensidade da luz',
                             style: TextStyle(
-                                color:
-                                AppTheme.textSecondary,
+                                color: AppTheme.textSecondary,
                                 fontSize: 13)),
                       ),
                       Text(
@@ -515,8 +502,7 @@ class _ControloTab extends StatelessWidget {
                   ),
                   Slider(
                     value: zone.lightIntensity,
-                    onChanged: (v) =>
-                        ss.setLightIntensity(zone.id, v),
+                    onChanged: (v) => ss.setLightIntensity(zone.id, v),
                     activeColor: AppTheme.warning,
                     inactiveColor: AppTheme.border,
                   ),
@@ -532,36 +518,39 @@ class _ControloTab extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               decoration: SS.card(),
               child: Wrap(
-                spacing: 8, runSpacing: 8,
-                children: zone.presentUsers
-                    .map((u) => Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: zone.color.withOpacity(0.1),
-                    borderRadius:
-                    BorderRadius.circular(8),
-                    border: Border.all(
-                        color: zone.color
-                            .withOpacity(0.25)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.person_rounded,
-                          color: zone.color,
-                          size: 12),
-                      const SizedBox(width: 5),
-                      Text(u,
+                spacing: 8,
+                runSpacing: 8,
+                children: zone.presentUsers.map((uid) {
+                  // ✅ Resolve UID → displayName via cache; fallback seguro sem RangeError
+                  final displayName =
+                      db.displayNameCache[uid] ?? _safeUidLabel(uid);
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: zone.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: zone.color.withOpacity(0.25)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.person_rounded,
+                            color: zone.color, size: 12),
+                        const SizedBox(width: 5),
+                        Text(
+                          displayName,
                           style: TextStyle(
                               color: zone.color,
                               fontSize: 11,
-                              fontWeight:
-                              FontWeight.w600)),
-                    ],
-                  ),
-                ))
-                    .toList(),
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
               ),
             ),
           ],
@@ -592,8 +581,7 @@ class _SensoresTab extends StatelessWidget {
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
-            physics:
-            const NeverScrollableScrollPhysics(),
+            physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
             childAspectRatio: 2.2,
@@ -610,8 +598,7 @@ class _SensoresTab extends StatelessWidget {
                 _SensorCard(
                   icon: Icons.water_drop_rounded,
                   label: 'Humidade',
-                  value:
-                  '${zone.humidity!.toStringAsFixed(0)}%',
+                  value: '${zone.humidity!.toStringAsFixed(0)}%',
                   color: AppTheme.accent,
                 ),
               if (zone.luminosity != null)
@@ -642,12 +629,10 @@ class _SensoresTab extends StatelessWidget {
             child: const Row(
               children: [
                 Icon(Icons.info_outline_rounded,
-                    color: AppTheme.textMuted,
-                    size: 14),
+                    color: AppTheme.textMuted, size: 14),
                 SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                      'Dados em tempo real via ESP32',
+                  child: Text('Dados em tempo real via ESP32',
                       style: TextStyle(
                           color: AppTheme.textMuted,
                           fontSize: 11)),
@@ -661,8 +646,7 @@ class _SensoresTab extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         decoration: SS.card(),
         child: const Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.sensors_off_rounded,
                 color: AppTheme.textMuted, size: 36),
@@ -676,9 +660,8 @@ class _SensoresTab extends StatelessWidget {
             Text(
               'Os dados aparecem aqui quando\no ESP32 estiver ligado.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: AppTheme.textMuted,
-                  fontSize: 12),
+              style:
+              TextStyle(color: AppTheme.textMuted, fontSize: 12),
             ),
           ],
         ),
@@ -702,8 +685,8 @@ class _SensorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(
-        horizontal: 12, vertical: 10),
+    padding:
+    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     decoration: BoxDecoration(
       color: color.withOpacity(0.06),
       borderRadius: BorderRadius.circular(12),
@@ -715,8 +698,7 @@ class _SensorCard extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Column(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(value,
@@ -726,8 +708,7 @@ class _SensorCard extends StatelessWidget {
                       fontWeight: FontWeight.w800)),
               Text(label,
                   style: const TextStyle(
-                      color: AppTheme.textMuted,
-                      fontSize: 10)),
+                      color: AppTheme.textMuted, fontSize: 10)),
             ],
           ),
         ),
@@ -742,8 +723,7 @@ class _ConfiguracaoTab extends StatelessWidget {
   final Zone zone;
   final SmartSpaceProvider ss;
 
-  const _ConfiguracaoTab(
-      {required this.zone, required this.ss});
+  const _ConfiguracaoTab({required this.zone, required this.ss});
 
   @override
   Widget build(BuildContext context) {
@@ -764,20 +744,16 @@ class _ConfiguracaoTab extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                          '${zone.occupantCount} / 10 pessoas',
+                      Text('${zone.occupantCount} / 10 pessoas',
                           style: const TextStyle(
                               color: AppTheme.textPrimary,
                               fontSize: 15,
                               fontWeight: FontWeight.w700)),
-                      const Text(
-                          'Ocupação atual / capacidade máxima',
+                      const Text('Ocupação atual / capacidade máxima',
                           style: TextStyle(
-                              color: AppTheme.textMuted,
-                              fontSize: 11)),
+                              color: AppTheme.textMuted, fontSize: 11)),
                     ],
                   ),
                 ),
@@ -788,10 +764,8 @@ class _ConfiguracaoTab extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 16),
-          const SectionLabel(
-              label: 'Limiares de Automação'),
+          const SectionLabel(label: 'Limiares de Automação'),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(14),
@@ -827,13 +801,10 @@ class _ConfiguracaoTab extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 16),
-          const SectionLabel(
-              label: 'Política de Resolução de Conflitos'),
+          const SectionLabel(label: 'Política de Resolução de Conflitos'),
           const SizedBox(height: 8),
           _ConflictPolicySelector(zoneId: zone.id),
-
           const SizedBox(height: 16),
           const SectionLabel(label: 'Consumo Energético'),
           const SizedBox(height: 8),
@@ -847,19 +818,16 @@ class _ConfiguracaoTab extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                          '${zone.energyUsageWh.toStringAsFixed(1)} Wh',
+                      Text('${zone.energyUsageWh.toStringAsFixed(1)} Wh',
                           style: const TextStyle(
                               color: AppTheme.textPrimary,
                               fontSize: 16,
                               fontWeight: FontWeight.w700)),
                       const Text('Consumo estimado',
                           style: TextStyle(
-                              color: AppTheme.textMuted,
-                              fontSize: 11)),
+                              color: AppTheme.textMuted, fontSize: 11)),
                     ],
                   ),
                 ),
@@ -870,7 +838,6 @@ class _ConfiguracaoTab extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -878,17 +845,14 @@ class _ConfiguracaoTab extends StatelessWidget {
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => AdminZoneDetailScreen(
-                        zoneId: zone.id)),
+                    builder: (_) =>
+                        AdminZoneDetailScreen(zoneId: zone.id)),
               ),
-              icon: const Icon(
-                  Icons.auto_fix_high_rounded,
-                  size: 16),
+              icon: const Icon(Icons.auto_fix_high_rounded, size: 16),
               label: const Text('Automações e modo demo'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: zone.color,
-                side: BorderSide(
-                    color: zone.color.withOpacity(0.4)),
+                side: BorderSide(color: zone.color.withOpacity(0.4)),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
               ),
@@ -899,8 +863,8 @@ class _ConfiguracaoTab extends StatelessWidget {
     );
   }
 
-  void _showThresholdDialog(BuildContext context,
-      String label, String currentValue) {
+  void _showThresholdDialog(
+      BuildContext context, String label, String currentValue) {
     final ctrl = TextEditingController(text: currentValue);
     showDialog(
       context: context,
@@ -910,13 +874,11 @@ class _ConfiguracaoTab extends StatelessWidget {
             borderRadius: BorderRadius.circular(16)),
         title: Text('Editar $label',
             style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 16)),
+                color: AppTheme.textPrimary, fontSize: 16)),
         content: TextField(
           controller: ctrl,
           keyboardType: TextInputType.number,
-          style:
-          const TextStyle(color: AppTheme.textPrimary),
+          style: const TextStyle(color: AppTheme.textPrimary),
           decoration: InputDecoration(labelText: label),
         ),
         actions: [
@@ -943,14 +905,12 @@ class _ConflictPolicySelector extends StatefulWidget {
       _ConflictPolicySelectorState();
 }
 
-class _ConflictPolicySelectorState
-    extends State<_ConflictPolicySelector> {
+class _ConflictPolicySelectorState extends State<_ConflictPolicySelector> {
   String _selected = 'average';
 
   final _policies = const [
     ('average', 'Média ponderada', Icons.equalizer_rounded),
-    ('priority', 'Prioridade por papel',
-    Icons.shield_rounded),
+    ('priority', 'Prioridade por papel', Icons.shield_rounded),
     ('first', 'Primeiro a chegar', Icons.timer_rounded),
     ('vote', 'Votação', Icons.how_to_vote_rounded),
   ];
@@ -960,28 +920,24 @@ class _ConflictPolicySelectorState
     padding: const EdgeInsets.all(14),
     decoration: SS.card(),
     child: Wrap(
-      spacing: 8, runSpacing: 8,
+      spacing: 8,
+      runSpacing: 8,
       children: _policies.map((p) {
         final (id, label, icon) = p;
         final active = _selected == id;
         return GestureDetector(
-          onTap: () =>
-              setState(() => _selected = id),
+          onTap: () => setState(() => _selected = id),
           child: AnimatedContainer(
-            duration:
-            const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.symmetric(
                 horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: active
                   ? AppTheme.accent.withOpacity(0.12)
                   : AppTheme.surface,
-              borderRadius:
-              BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                  color: active
-                      ? AppTheme.accent
-                      : AppTheme.border,
+                  color: active ? AppTheme.accent : AppTheme.border,
                   width: active ? 1.5 : 1),
             ),
             child: Row(
@@ -1036,8 +992,7 @@ class _ThresholdRow extends StatelessWidget {
       Expanded(
           child: Text(label,
               style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13))),
+                  color: AppTheme.textSecondary, fontSize: 13))),
       Text(value,
           style: TextStyle(
               color: color,
@@ -1077,27 +1032,21 @@ class _AdminToggleButton extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: active
-            ? color.withOpacity(0.12)
-            : AppTheme.surface,
+        color: active ? color.withOpacity(0.12) : AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-            color: active
-                ? color.withOpacity(0.4)
-                : AppTheme.border),
+            color:
+            active ? color.withOpacity(0.4) : AppTheme.border),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon,
-              color: active ? color : AppTheme.textMuted,
-              size: 18),
+              color: active ? color : AppTheme.textMuted, size: 18),
           const SizedBox(width: 8),
           Text(label,
               style: TextStyle(
-                  color: active
-                      ? color
-                      : AppTheme.textPrimary,
+                  color: active ? color : AppTheme.textPrimary,
                   fontSize: 13,
                   fontWeight: FontWeight.w700)),
           const Spacer(),

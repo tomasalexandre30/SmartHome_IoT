@@ -18,15 +18,32 @@ class UserShell extends StatefulWidget {
 class _UserShellState extends State<UserShell> {
   int _index = 0;
 
+  // ✅ Guardamos referência à função listener para poder removê-la
+  VoidCallback? _bleListener;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ble = context.read<BeaconService>();
       final ss  = context.read<SmartSpaceProvider>();
-      ble.addListener(() => ss.updateZoneFromBeacon(ble.currentZoneId));
+
+      // ✅ Cria o listener uma única vez e guarda referência
+      _bleListener = () => ss.updateZoneFromBeacon(ble.currentZoneId);
+      ble.addListener(_bleListener!);
       ble.startScanning();
     });
+  }
+
+  @override
+  void dispose() {
+    // ✅ Remove o listener ao destruir o widget — evita leaks e listeners duplicados
+    if (_bleListener != null) {
+      final ble = context.read<BeaconService>();
+      ble.removeListener(_bleListener!);
+      _bleListener = null;
+    }
+    super.dispose();
   }
 
   static const _screens = [
@@ -54,7 +71,8 @@ class _UserShellState extends State<UserShell> {
       body: IndexedStack(index: _index, children: _screens),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: AppTheme.border, width: 1)),
+          border:
+          Border(top: BorderSide(color: AppTheme.border, width: 1)),
         ),
         child: BottomNavigationBar(
           currentIndex: _index,
@@ -65,10 +83,10 @@ class _UserShellState extends State<UserShell> {
           unselectedItemColor: AppTheme.textDisabled,
           type: BottomNavigationBarType.fixed,
           elevation: 0,
-          selectedLabelStyle: const TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w700),
-          unselectedLabelStyle: const TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w600),
+          selectedLabelStyle:
+          const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+          unselectedLabelStyle:
+          const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
         ),
       ),
     );

@@ -20,18 +20,34 @@ class _AdminShellState extends State<AdminShell> {
   int _index = 0;
   int _lastSeenLogCount = 0;
 
+  // ✅ Guardamos referência à função listener para poder removê-la
+  VoidCallback? _bleListener;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ble = context.read<BeaconService>();
       final ss  = context.read<SmartSpaceProvider>();
-      ble.addListener(() => ss.updateZoneFromBeacon(ble.currentZoneId));
+
+      // ✅ Cria o listener uma única vez e guarda referência
+      _bleListener = () => ss.updateZoneFromBeacon(ble.currentZoneId);
+      ble.addListener(_bleListener!);
       ble.startScanning();
 
-      // Inicializa o contador com os logs atuais
       _lastSeenLogCount = _alertCount(ss.logs);
     });
+  }
+
+  @override
+  void dispose() {
+    // ✅ Remove o listener ao destruir o widget — evita leaks e listeners duplicados
+    if (_bleListener != null) {
+      final ble = context.read<BeaconService>();
+      ble.removeListener(_bleListener!);
+      _bleListener = null;
+    }
+    super.dispose();
   }
 
   static final _screens = [
@@ -51,8 +67,6 @@ class _AdminShellState extends State<AdminShell> {
   Widget build(BuildContext context) {
     final ss = context.watch<SmartSpaceProvider>();
     final totalAlerts = _alertCount(ss.logs);
-
-    // Quantos alertas novos desde a última vez que abriu o Histórico
     final unseenAlerts = (totalAlerts - _lastSeenLogCount).clamp(0, 99);
 
     return Scaffold(
@@ -66,7 +80,6 @@ class _AdminShellState extends State<AdminShell> {
           currentIndex: _index,
           onTap: (i) {
             setState(() => _index = i);
-            // Quando abre o Histórico, marca todos como vistos
             if (i == 2) {
               setState(() => _lastSeenLogCount = totalAlerts);
             }
@@ -98,10 +111,10 @@ class _AdminShellState extends State<AdminShell> {
           unselectedItemColor: AppTheme.textDisabled,
           type: BottomNavigationBarType.fixed,
           elevation: 0,
-          selectedLabelStyle: const TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w700),
-          unselectedLabelStyle: const TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w600),
+          selectedLabelStyle:
+          const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+          unselectedLabelStyle:
+          const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
         ),
       ),
     );
@@ -132,7 +145,8 @@ class _BadgeIcon extends StatelessWidget {
             top: -4,
             right: -8,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
               decoration: BoxDecoration(
                 color: AppTheme.error,
                 borderRadius: BorderRadius.circular(8),

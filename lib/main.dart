@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -76,7 +77,6 @@ class _AuthGateState extends State<_AuthGate> {
 
   @override
   Widget build(BuildContext context) {
-    // USA READ em vez de WATCH para não causar rebuilds
     final auth = context.read<AuthService>();
 
     return StreamBuilder<User?>(
@@ -190,6 +190,9 @@ class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
   bool _loading = true;
   String? _uid;
 
+  // Timer para reavaliar ESP32 online status a cada 10s
+  Timer? _esp32HeartbeatTimer;
+
   @override
   void initState() {
     super.initState();
@@ -199,8 +202,20 @@ class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _esp32HeartbeatTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _startEsp32Timer() {
+    _esp32HeartbeatTimer?.cancel();
+    _esp32HeartbeatTimer = Timer.periodic(
+      const Duration(seconds: 10),
+          (_) {
+        if (!mounted) return;
+        context.read<SmartSpaceProvider>().reevaluateEsp32Status();
+      },
+    );
   }
 
   @override
@@ -212,16 +227,16 @@ class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
 
     switch (state) {
       case AppLifecycleState.resumed:
-      // Re-inicializa completamente — limpa zonas residuais e marca online
         db.initialize(_uid!).then((_) {
           ss.attachDatabase(db, _uid!, auth.appUser);
         });
+        _startEsp32Timer();
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
-      // Limpa zona atual antes de marcar offline
+        _esp32HeartbeatTimer?.cancel();
         ss.clearZoneOnLogout().then((_) {
           db.updateUserPresence(_uid!, false);
         });
@@ -240,9 +255,15 @@ class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
       final ss = context.read<SmartSpaceProvider>();
       await db.initialize(uid);
       ss.attachDatabase(db, uid, auth.appUser);
+      // ✅ NÃO adiciona listener BLE aqui — o AdminShell e UserShell
+      // já têm os seus próprios listeners. Adicionar aqui criaria
+      // listeners duplicados → utilizador entrava 2-3x na mesma zona.
     }
 
-    if (mounted) setState(() => _loading = false);
+    if (mounted) {
+      setState(() => _loading = false);
+      _startEsp32Timer();
+    }
   }
 
   @override

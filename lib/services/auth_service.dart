@@ -23,7 +23,9 @@ class AppUser {
   factory AppUser.fromDoc(String uid, Map<String, dynamic> data) => AppUser(
     uid: uid,
     email: data['email'] ?? '',
-    displayName: data['displayName'] ?? data['email']?.split('@').first ?? 'Utilizador',
+    displayName: data['displayName'] ??
+        data['email']?.split('@').first ??
+        'Utilizador',
     role: data['role'] == 'admin' ? UserRole.admin : UserRole.user,
   );
 }
@@ -33,7 +35,8 @@ class AuthService extends ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseDatabase _rtdb = FirebaseDatabase.instanceFor(
     app: FirebaseDatabase.instance.app,
-    databaseURL: 'https://smartspaceiot-default-rtdb.europe-west1.firebasedatabase.app',
+    databaseURL:
+    'https://smartspaceiot-default-rtdb.europe-west1.firebasedatabase.app',
   );
 
   AppUser? _appUser;
@@ -49,8 +52,10 @@ class AuthService extends ChangeNotifier {
   // ── Carregar perfil ────────────────────────────────────────────────────
   Future<void> loadUserProfile() async {
     final user = _auth.currentUser;
-    if (user == null) { _appUser = null; return; }
-
+    if (user == null) {
+      _appUser = null;
+      return;
+    }
     try {
       final doc = await _db.collection('users').doc(user.uid).get();
       if (doc.exists) {
@@ -94,7 +99,8 @@ class AuthService extends ChangeNotifier {
         uid: cred.user!.uid,
         userName: name,
         type: 'userRegister',
-        message: '$name registou-se como ${isAdminCode ? "administrador" : "utilizador"}',
+        message:
+        '$name registou-se como ${isAdminCode ? "administrador" : "utilizador"}',
         role: role,
       );
 
@@ -119,7 +125,8 @@ class AuthService extends ChangeNotifier {
         uid: _auth.currentUser!.uid,
         userName: _appUser?.displayName ?? email.split('@').first,
         type: 'userLogin',
-        message: '${_appUser?.displayName ?? email.split('@').first} iniciou sessão',
+        message:
+        '${_appUser?.displayName ?? email.split('@').first} iniciou sessão',
         role: _appUser?.role.name ?? 'user',
       );
 
@@ -131,20 +138,31 @@ class AuthService extends ChangeNotifier {
 
   // ── Logout ─────────────────────────────────────────────────────────────
   Future<void> logout() async {
-    if (_auth.currentUser != null && _appUser != null) {
+    final uid = _auth.currentUser?.uid;
+    final name = _appUser?.displayName;
+    final role = _appUser?.role.name ?? 'user';
+
+    if (uid != null && name != null) {
       await _saveAuthLog(
-        uid: _auth.currentUser!.uid,
-        userName: _appUser!.displayName,
+        uid: uid,
+        userName: name,
         type: 'userLogout',
-        message: '${_appUser!.displayName} terminou sessão',
-        role: _appUser!.role.name,
+        message: '$name terminou sessão',
+        role: role,
       );
 
-      // Marca como offline explicitamente
+      // ✅ Remove o utilizador de TODAS as zonas antes de fazer logout
+      // (o clearZoneOnLogout do provider já trata da zona atual,
+      //  mas esta chamada garante limpeza completa mesmo em casos edge)
       try {
-        await _rtdb
-            .ref('smartspace/users/${_auth.currentUser!.uid}')
-            .update({
+        await _removeUserFromAllZones(uid);
+      } catch (e) {
+        debugPrint('[AUTH] Erro ao limpar zonas no logout: $e');
+      }
+
+      // Marca como offline no RTDB
+      try {
+        await _rtdb.ref('smartspace/users/$uid').update({
           'online': false,
           'lastSeen': ServerValue.timestamp,
           'currentZoneId': null,
@@ -160,6 +178,33 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Remove o uid de todas as zonas onde apareça em presentUsers.
+  /// Lógica duplicada aqui (não depende do DatabaseService) para funcionar
+  /// mesmo que o provider já tenha sido destruído.
+  Future<void> _removeUserFromAllZones(String uid) async {
+    final zonesSnap = await _rtdb.ref('smartspace/zones').get();
+    if (!zonesSnap.exists) return;
+
+    final zones = Map<String, dynamic>.from(zonesSnap.value as Map);
+    for (final entry in zones.entries) {
+      final zoneId = entry.key as String;
+      final zoneData = Map<String, dynamic>.from(entry.value as Map);
+      final presentUsers = zoneData['presentUsers'];
+
+      if (presentUsers is Map && presentUsers.containsKey(uid)) {
+        final remaining = Map.from(presentUsers)..remove(uid);
+        final newCount = remaining.length;
+        await _rtdb.ref('smartspace/zones/$zoneId').update({
+          'presentUsers/$uid': null,
+          'occupantCount': newCount,
+          'status': newCount == 0 ? 'free' : 'occupied',
+          'lastUpdated': ServerValue.timestamp,
+        });
+        debugPrint('[AUTH] Logout cleanup: $uid removido de $zoneId → $newCount');
+      }
+    }
+  }
+
   // ── Apagar conta ───────────────────────────────────────────────────────
   Future<String?> deleteAccount({required String password}) async {
     try {
@@ -168,7 +213,6 @@ class AuthService extends ChangeNotifier {
 
       debugPrint('[AUTH] A apagar conta: ${user.uid}');
 
-      // Reautentica antes de apagar
       try {
         final credential = EmailAuthProvider.credential(
           email: user.email!,
@@ -181,6 +225,13 @@ class AuthService extends ChangeNotifier {
           return 'Password incorreta. Tenta novamente.';
         }
         return _errorMessage(e.code);
+      }
+
+      // ✅ Limpa zonas antes de apagar a conta
+      try {
+        await _removeUserFromAllZones(user.uid);
+      } catch (e) {
+        debugPrint('[AUTH] Erro ao limpar zonas no deleteAccount: $e');
       }
 
       // Apaga preferências do Firestore
@@ -214,7 +265,6 @@ class AuthService extends ChangeNotifier {
         debugPrint('[AUTH] Erro ao apagar RTDB: $e');
       }
 
-      // Apaga conta do Firebase Auth
       await user.delete();
       debugPrint('[AUTH] Conta Firebase Auth apagada');
 
@@ -256,14 +306,22 @@ class AuthService extends ChangeNotifier {
   // ── Erros ──────────────────────────────────────────────────────────────
   String _errorMessage(String code) {
     switch (code) {
-      case 'email-already-in-use':  return 'Este email já está registado.';
-      case 'invalid-email':         return 'Email inválido.';
-      case 'weak-password':         return 'Password demasiado fraca (mínimo 6 caracteres).';
-      case 'user-not-found':        return 'Utilizador não encontrado.';
-      case 'wrong-password':        return 'Password incorreta.';
-      case 'invalid-credential':    return 'Credenciais inválidas.';
-      case 'too-many-requests':     return 'Demasiadas tentativas. Tenta mais tarde.';
-      default:                      return 'Erro inesperado. Tenta novamente.';
+      case 'email-already-in-use':
+        return 'Este email já está registado.';
+      case 'invalid-email':
+        return 'Email inválido.';
+      case 'weak-password':
+        return 'Password demasiado fraca (mínimo 6 caracteres).';
+      case 'user-not-found':
+        return 'Utilizador não encontrado.';
+      case 'wrong-password':
+        return 'Password incorreta.';
+      case 'invalid-credential':
+        return 'Credenciais inválidas.';
+      case 'too-many-requests':
+        return 'Demasiadas tentativas. Tenta mais tarde.';
+      default:
+        return 'Erro inesperado. Tenta novamente.';
     }
   }
 }

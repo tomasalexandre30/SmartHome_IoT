@@ -4,18 +4,14 @@ import '../theme/app_theme.dart';
 enum ZoneStatus { free, occupied, unknown }
 
 enum LogEventType {
-  // Autenticação
   userRegister,
   userLogin,
   userLogout,
-  // Zonas
   zoneEntry,
   zoneExit,
   beaconDetected,
-  // Comandos
   manualCommand,
   automationTrigger,
-  // Sistema
   connectionLost,
   connectionRestored,
   alert,
@@ -206,6 +202,9 @@ class Zone {
   double energyUsageWh;
   DateTime lastUpdated;
 
+  // ✅ NOVO: estado online do ESP32 desta zona
+  bool esp32Online;
+
   Zone({
     required this.id,
     required this.name,
@@ -225,6 +224,7 @@ class Zone {
     List<AutomationRule>? rules,
     this.energyUsageWh = 0,
     DateTime? lastUpdated,
+    this.esp32Online = false,
   })  : presentUsers = presentUsers ?? [],
         rules = rules ?? [],
         lastUpdated = lastUpdated ?? DateTime.now();
@@ -259,6 +259,7 @@ class Zone {
     double? lightIntensity,
     bool? buzzerOn,
     double? energyUsageWh,
+    bool? esp32Online,
   }) => Zone(
     id: id,
     name: name,
@@ -278,6 +279,7 @@ class Zone {
     rules: rules,
     energyUsageWh: energyUsageWh ?? this.energyUsageWh,
     lastUpdated: DateTime.now(),
+    esp32Online: esp32Online ?? this.esp32Online,
   );
 }
 
@@ -352,14 +354,14 @@ class DefaultData {
     Zone(
       id: 'zone_b',
       name: 'Quarto',
-      beaconUuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
+      beaconUuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647826',
       color: AppTheme.zoneColors[1],
       icon: Icons.bed_rounded,
     ),
     Zone(
       id: 'zone_c',
       name: 'Escritório',
-      beaconUuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
+      beaconUuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647827',
       color: AppTheme.zoneColors[2],
       icon: Icons.computer_rounded,
     ),
@@ -373,15 +375,15 @@ class DefaultData {
       zoneId: 'zone_a',
     ),
     Beacon(
-      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
+      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647826',
       mac: '51:00:24:12:01:E3',
       name: 'R24120483',
       zoneId: 'zone_b',
     ),
     Beacon(
-      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
+      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647827',
       mac: '51:00:24:12:01:B2',
-      name: 'R241204XX',
+      name: 'R24120434',
       zoneId: 'zone_c',
     ),
   ];
