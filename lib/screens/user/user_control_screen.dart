@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/smartspace_provider.dart';
@@ -51,7 +52,7 @@ class UserControlScreen extends StatelessWidget {
   }
 }
 
-// ── No Zone State ──────────────────────────────────────────────────────────────
+// ── No Zone State ─────────────────────────────────────────────────────────────
 
 class _NoZoneState extends StatelessWidget {
   final bool scanning;
@@ -72,7 +73,9 @@ class _NoZoneState extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
               ),
               child: Icon(
-                scanning ? Icons.bluetooth_searching_rounded : Icons.location_off_rounded,
+                scanning
+                    ? Icons.bluetooth_searching_rounded
+                    : Icons.location_off_rounded,
                 color: AppTheme.accent,
                 size: 36,
               ),
@@ -92,7 +95,8 @@ class _NoZoneState extends StatelessWidget {
                   ? 'Os controlos ficam disponíveis quando a tua zona for detetada.'
                   : 'Ativa o scan BLE no Dashboard para detetar a tua zona.',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: const TextStyle(
+                  color: AppTheme.textSecondary, fontSize: 14),
             ),
           ],
         ),
@@ -101,7 +105,7 @@ class _NoZoneState extends StatelessWidget {
   }
 }
 
-// ── Current Zone Banner ────────────────────────────────────────────────────────
+// ── Current Zone Banner ───────────────────────────────────────────────────────
 
 class _CurrentZoneBanner extends StatelessWidget {
   final Zone zone;
@@ -142,11 +146,13 @@ class _CurrentZoneBanner extends StatelessWidget {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    const Icon(Icons.people_rounded, size: 12, color: AppTheme.textMuted),
+                    const Icon(Icons.people_rounded,
+                        size: 12, color: AppTheme.textMuted),
                     const SizedBox(width: 4),
                     Text(
                       '${zone.occupantCount} ocupante${zone.occupantCount != 1 ? "s" : ""}',
-                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                      style: const TextStyle(
+                          color: AppTheme.textSecondary, fontSize: 12),
                     ),
                   ],
                 ),
@@ -160,7 +166,7 @@ class _CurrentZoneBanner extends StatelessWidget {
   }
 }
 
-// ── Controls Grid ──────────────────────────────────────────────────────────────
+// ── Controls Grid ─────────────────────────────────────────────────────────────
 
 class _ControlsGrid extends StatelessWidget {
   final Zone zone;
@@ -218,14 +224,15 @@ class _ControlsGrid extends StatelessWidget {
                     ),
                     const SizedBox(width: 10),
                     const Expanded(
-                      child: Text('Intensidade da luz',
+                      child: Text('Intensidade',
                           style: TextStyle(
                               color: AppTheme.textPrimary,
                               fontSize: 14,
                               fontWeight: FontWeight.w600)),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: AppTheme.warning.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(8),
@@ -244,8 +251,10 @@ class _ControlsGrid extends StatelessWidget {
                 SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 4,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                    thumbShape:
+                    const RoundSliderThumbShape(enabledThumbRadius: 8),
+                    overlayShape:
+                    const RoundSliderOverlayShape(overlayRadius: 16),
                   ),
                   child: Slider(
                     value: zone.lightIntensity,
@@ -257,20 +266,580 @@ class _ControlsGrid extends StatelessWidget {
                 const Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('0%', style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
-                    Text('100%', style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                    Text('0%',
+                        style: TextStyle(
+                            color: AppTheme.textMuted, fontSize: 10)),
+                    Text('100%',
+                        style: TextStyle(
+                            color: AppTheme.textMuted, fontSize: 10)),
                   ],
                 ),
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          _ColorPickerCard(zone: zone),
+          const SizedBox(height: 12),
+          _TimerCard(zone: zone),
         ],
       ],
     );
   }
 }
 
-// ── Big Toggle Button ──────────────────────────────────────────────────────────
+// ── Preset Color ──────────────────────────────────────────────────────────────
+
+class _PresetColor {
+  final String name;
+  final Color color;
+  const _PresetColor(this.name, this.color);
+}
+
+// ── Color Picker Card ─────────────────────────────────────────────────────────
+
+class _ColorPickerCard extends StatelessWidget {
+  final Zone zone;
+  const _ColorPickerCard({required this.zone});
+
+  static const List<_PresetColor> _presets = [
+    _PresetColor('Branco',   Color(0xFFFFFFFF)),
+    _PresetColor('Vermelho', Color(0xFFFF0000)),
+    _PresetColor('Verde',    Color(0xFF00FF00)),
+    _PresetColor('Azul',     Color(0xFF0000FF)),
+    _PresetColor('Amarelo',  Color(0xFFFFFF00)),
+    _PresetColor('Ciano',    Color(0xFF00FFFF)),
+    _PresetColor('Magenta',  Color(0xFFFF00FF)),
+    _PresetColor('Laranja',  Color(0xFFFF6600)),
+    _PresetColor('Roxo',     Color(0xFF8800FF)),
+    _PresetColor('Rosa',     Color(0xFFFF0088)),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ss = context.read<SmartSpaceProvider>();
+    final currentColor = zone.lightColor;
+    final isWhite = zone.lightR > 200 && zone.lightG > 200 && zone.lightB > 200;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: SS.card(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  color: isWhite
+                      ? const Color(0xFF2C2C2C)
+                      : currentColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isWhite
+                        ? const Color(0xFF555555)
+                        : currentColor.withOpacity(0.5),
+                    width: 1.5,
+                  ),
+                ),
+                child: Icon(Icons.palette_rounded,
+                    color: isWhite ? Colors.white : currentColor,
+                    size: 16),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('Cor do LED',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+              ),
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: currentColor,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isWhite
+                        ? const Color(0xFF999999)
+                        : currentColor.withOpacity(0.5),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isWhite
+                          ? Colors.grey.withOpacity(0.3)
+                          : currentColor.withOpacity(0.5),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _presets.map((preset) {
+              final isSelected = zone.lightR == preset.color.red &&
+                  zone.lightG == preset.color.green &&
+                  zone.lightB == preset.color.blue;
+              final isPresetWhite = preset.color == Colors.white;
+
+              return GestureDetector(
+                onTap: () => ss.setLightColor(zone.id, preset.color),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isPresetWhite
+                        ? (isSelected
+                        ? const Color(0xFF2C2C2C)
+                        : const Color(0xFFE8E8E8))
+                        : preset.color.withOpacity(isSelected ? 0.25 : 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isPresetWhite
+                          ? (isSelected
+                          ? const Color(0xFF888888)
+                          : const Color(0xFFCCCCCC))
+                          : (isSelected
+                          ? preset.color.withOpacity(0.8)
+                          : preset.color.withOpacity(0.3)),
+                      width: isSelected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 10, height: 10,
+                        decoration: BoxDecoration(
+                          color: preset.color,
+                          shape: BoxShape.circle,
+                          border: isPresetWhite
+                              ? Border.all(
+                              color: const Color(0xFFAAAAAA), width: 1)
+                              : null,
+                          boxShadow: isSelected
+                              ? [
+                            BoxShadow(
+                              color: isPresetWhite
+                                  ? Colors.grey.withOpacity(0.5)
+                                  : preset.color.withOpacity(0.6),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            )
+                          ]
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        preset.name,
+                        style: TextStyle(
+                          color: isPresetWhite
+                              ? (isSelected
+                              ? Colors.white
+                              : AppTheme.textPrimary)
+                              : preset.color,
+                          fontSize: 12,
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          _RgbSliderRow(
+            label: 'R',
+            value: zone.lightR,
+            color: const Color(0xFFFF3333),
+            onChanged: (v) => ss.setLightColor(
+                zone.id, Color.fromRGBO(v, zone.lightG, zone.lightB, 1.0)),
+          ),
+          const SizedBox(height: 8),
+          _RgbSliderRow(
+            label: 'G',
+            value: zone.lightG,
+            color: const Color(0xFF22CC22),
+            onChanged: (v) => ss.setLightColor(
+                zone.id, Color.fromRGBO(zone.lightR, v, zone.lightB, 1.0)),
+          ),
+          const SizedBox(height: 8),
+          _RgbSliderRow(
+            label: 'B',
+            value: zone.lightB,
+            color: const Color(0xFF3366FF),
+            onChanged: (v) => ss.setLightColor(
+                zone.id, Color.fromRGBO(zone.lightR, zone.lightG, v, 1.0)),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Text(
+                'RGB(${zone.lightR}, ${zone.lightG}, ${zone.lightB})',
+                style: const TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── RGB Slider Row ────────────────────────────────────────────────────────────
+
+class _RgbSliderRow extends StatelessWidget {
+  final String label;
+  final int value;
+  final Color color;
+  final ValueChanged<int> onChanged;
+
+  const _RgbSliderRow({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 16,
+          child: Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape:
+              const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape:
+              const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: Slider(
+              value: value.toDouble(),
+              min: 0,
+              max: 255,
+              onChanged: (v) => onChanged(v.toInt()),
+              activeColor: color,
+              inactiveColor: AppTheme.border,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 30,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+                color: AppTheme.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Timer Card ────────────────────────────────────────────────────────────────
+
+class _TimerCard extends StatefulWidget {
+  final Zone zone;
+  const _TimerCard({required this.zone});
+
+  @override
+  State<_TimerCard> createState() => _TimerCardState();
+}
+
+class _TimerCardState extends State<_TimerCard> {
+  int _selectedMinutes = 15;
+  Timer? _countdown;
+  int _remainingSeconds = 0;
+  bool _active = false;
+
+  static const List<int> _options = [5, 10, 15, 30, 60];
+
+  @override
+  void dispose() {
+    _countdown?.cancel();
+    super.dispose();
+  }
+
+  void _start() {
+    final ss = context.read<SmartSpaceProvider>();
+    setState(() {
+      _active = true;
+      _remainingSeconds = _selectedMinutes * 60;
+    });
+    _countdown?.cancel();
+    _countdown = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      setState(() => _remainingSeconds--);
+      if (_remainingSeconds <= 0) {
+        t.cancel();
+        setState(() => _active = false);
+        if (widget.zone.lightOn) ss.toggleLight(widget.zone.id);
+      }
+    });
+  }
+
+  void _cancel() {
+    _countdown?.cancel();
+    setState(() {
+      _active = false;
+      _remainingSeconds = 0;
+    });
+  }
+
+  String get _formattedTime {
+    final m = _remainingSeconds ~/ 60;
+    final s = _remainingSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  double get _progress =>
+      _active ? _remainingSeconds / (_selectedMinutes * 60) : 1.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: SS.card(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header ───────────────────────────────────────────────────────
+          Row(
+            children: [
+              Container(
+                width: 32, height: 32,
+                decoration: SS.iconBox(color: AppTheme.accent),
+                child: const Icon(Icons.timer_rounded,
+                    color: AppTheme.accent, size: 16),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('Temporizador',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+              ),
+              if (_active)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _formattedTime,
+                    style: const TextStyle(
+                        color: AppTheme.accent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        fontFamily: 'monospace'),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          if (!_active) ...[
+            // ── Seleção de tempo ──────────────────────────────────────────
+            Row(
+              children: _options.map((min) {
+                final selected = _selectedMinutes == min;
+                final isLast = min == _options.last;
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _selectedMinutes = min),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      margin: EdgeInsets.only(right: isLast ? 0 : 6),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? AppTheme.accent.withOpacity(0.15)
+                            : AppTheme.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: selected
+                              ? AppTheme.accent.withOpacity(0.5)
+                              : AppTheme.border,
+                          width: selected ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            '$min',
+                            style: TextStyle(
+                              color: selected
+                                  ? AppTheme.accent
+                                  : AppTheme.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          Text(
+                            'min',
+                            style: TextStyle(
+                              color: selected
+                                  ? AppTheme.accent
+                                  : AppTheme.textMuted,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: GestureDetector(
+                onTap: widget.zone.lightOn ? _start : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: widget.zone.lightOn
+                        ? AppTheme.accent.withOpacity(0.12)
+                        : AppTheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: widget.zone.lightOn
+                          ? AppTheme.accent.withOpacity(0.4)
+                          : AppTheme.border,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.timer_outlined,
+                          color: widget.zone.lightOn
+                              ? AppTheme.accent
+                              : AppTheme.textMuted,
+                          size: 16),
+                      const SizedBox(width: 8),
+                      Text(
+                        widget.zone.lightOn
+                            ? 'Desligar em $_selectedMinutes min'
+                            : 'Luz já está desligada',
+                        style: TextStyle(
+                          color: widget.zone.lightOn
+                              ? AppTheme.accent
+                              : AppTheme.textMuted,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ] else ...[
+            // ── Ativo ─────────────────────────────────────────────────────
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: _progress,
+                backgroundColor: AppTheme.border,
+                color: AppTheme.accent,
+                minHeight: 4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.accent.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: AppTheme.accent.withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.lightbulb_rounded,
+                      color: AppTheme.accent, size: 16),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'A luz desliga em $_formattedTime',
+                      style: const TextStyle(
+                          color: AppTheme.accent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _cancel,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppTheme.error.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: AppTheme.error.withOpacity(0.3)),
+                      ),
+                      child: const Text('Cancelar',
+                          style: TextStyle(
+                              color: AppTheme.error,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Big Toggle Button ─────────────────────────────────────────────────────────
 
 class _BigToggleBtn extends StatelessWidget {
   final IconData icon;
@@ -313,7 +882,9 @@ class _BigToggleBtn extends StatelessWidget {
                 Container(
                   width: 40, height: 40,
                   decoration: BoxDecoration(
-                    color: active ? color.withOpacity(0.15) : AppTheme.surface,
+                    color: active
+                        ? color.withOpacity(0.15)
+                        : AppTheme.surface,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(icon,
@@ -330,7 +901,9 @@ class _BigToggleBtn extends StatelessWidget {
             const SizedBox(height: 12),
             Text(label,
                 style: TextStyle(
-                  color: active ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  color: active
+                      ? AppTheme.textPrimary
+                      : AppTheme.textSecondary,
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                 )),
@@ -359,7 +932,7 @@ class _BigToggleBtn extends StatelessWidget {
   }
 }
 
-// ── Sensors Card ───────────────────────────────────────────────────────────────
+// ── Sensors Card ──────────────────────────────────────────────────────────────
 
 class _SensorsCard extends StatelessWidget {
   final Zone zone;
@@ -396,7 +969,8 @@ class _SensorsCard extends StatelessWidget {
                           fontWeight: FontWeight.w600)),
                   SizedBox(height: 2),
                   Text('Aguarda a ligação ao ESP32.',
-                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                      style: TextStyle(
+                          color: AppTheme.textMuted, fontSize: 12)),
                 ],
               ),
             ),
@@ -410,16 +984,24 @@ class _SensorsCard extends StatelessWidget {
       child: Column(
         children: [
           if (zone.temperature != null)
-            _SensorRow(icon: Icons.thermostat_rounded, label: 'Temperatura',
-                value: '${zone.temperature!.toStringAsFixed(1)}°C', color: AppTheme.warning),
+            _SensorRow(
+                icon: Icons.thermostat_rounded,
+                label: 'Temperatura',
+                value: '${zone.temperature!.toStringAsFixed(1)}°C',
+                color: AppTheme.warning),
           if (zone.humidity != null) ...[
             const Divider(height: 1, indent: 16, endIndent: 16),
-            _SensorRow(icon: Icons.water_drop_rounded, label: 'Humidade',
-                value: '${zone.humidity!.toStringAsFixed(0)}%', color: AppTheme.accent),
+            _SensorRow(
+                icon: Icons.water_drop_rounded,
+                label: 'Humidade',
+                value: '${zone.humidity!.toStringAsFixed(0)}%',
+                color: AppTheme.accent),
           ],
           if (zone.luminosity != null) ...[
             const Divider(height: 1, indent: 16, endIndent: 16),
-            _SensorRow(icon: Icons.wb_sunny_rounded, label: 'Luminosidade',
+            _SensorRow(
+                icon: Icons.wb_sunny_rounded,
+                label: 'Luminosidade',
                 value: '${zone.luminosity!.toStringAsFixed(0)} lx',
                 color: const Color(0xFFFFB830)),
           ],
@@ -429,7 +1011,9 @@ class _SensorsCard extends StatelessWidget {
               icon: Icons.motion_photos_on_rounded,
               label: 'Movimento',
               value: zone.motionDetected! ? 'Detetado' : 'Sem movimento',
-              color: zone.motionDetected! ? AppTheme.success : AppTheme.textMuted,
+              color: zone.motionDetected!
+                  ? AppTheme.success
+                  : AppTheme.textMuted,
             ),
           ],
         ],
@@ -445,8 +1029,10 @@ class _SensorRow extends StatelessWidget {
   final Color color;
 
   const _SensorRow({
-    required this.icon, required this.label,
-    required this.value, required this.color,
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
   });
 
   @override
@@ -460,16 +1046,21 @@ class _SensorRow extends StatelessWidget {
           child: Icon(icon, color: color, size: 18),
         ),
         const SizedBox(width: 14),
-        Expanded(child: Text(label,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14))),
+        Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    color: AppTheme.textSecondary, fontSize: 14))),
         Text(value,
-            style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w800)),
+            style: TextStyle(
+                color: color,
+                fontSize: 16,
+                fontWeight: FontWeight.w800)),
       ],
     ),
   );
 }
 
-// ── Other Zone Row ─────────────────────────────────────────────────────────────
+// ── Other Zone Row ────────────────────────────────────────────────────────────
 
 class _OtherZoneRow extends StatelessWidget {
   final Zone zone;
@@ -502,11 +1093,13 @@ class _OtherZoneRow extends StatelessWidget {
               const SizedBox(height: 2),
               Row(
                 children: [
-                  const Icon(Icons.people_rounded, size: 12, color: AppTheme.textMuted),
+                  const Icon(Icons.people_rounded,
+                      size: 12, color: AppTheme.textMuted),
                   const SizedBox(width: 4),
                   Text(
                     '${zone.occupantCount} ocupante${zone.occupantCount != 1 ? "s" : ""}',
-                    style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                    style: const TextStyle(
+                        color: AppTheme.textMuted, fontSize: 12),
                   ),
                 ],
               ),

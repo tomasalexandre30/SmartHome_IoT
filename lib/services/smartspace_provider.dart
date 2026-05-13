@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import '../models/models.dart';
 import 'database_service.dart';
 import 'auth_service.dart';
@@ -82,6 +83,9 @@ class SmartSpaceProvider extends ChangeNotifier {
         occupantCount: safeCount,
         lightOn: d['lightOn'] as bool? ?? false,
         lightIntensity: (d['lightIntensity'] as num?)?.toDouble() ?? 1.0,
+        lightR: (d['lightR'] as int?) ?? 255,
+        lightG: (d['lightG'] as int?) ?? 255,
+        lightB: (d['lightB'] as int?) ?? 255,
         buzzerOn: d['buzzerOn'] as bool? ?? false,
         luminosity: (d['luminosity'] as num?)?.toDouble(),
         temperature: (d['temperature'] as num?)?.toDouble(),
@@ -129,17 +133,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     catch (_) { return null; }
   }
 
-  // ── ZONA TRACKING — OPERAÇÕES ATÓMICAS ─────────────────────────────────────
-  //
-  // ANTES: lia presentUsers do estado LOCAL e fazia SET completo → race condition
-  //        quando o stream RTDB não tinha chegado ainda com o estado mais recente.
-  //
-  // AGORA: vai direto ao RTDB com operações path-by-path atómicas:
-  //   saída  → remove  presentUsers/{uid}  + decrementa count
-  //   entrada → adiciona presentUsers/{uid} + incrementa count
-  //
-  // Isto elimina o "utilizador preso" porque nunca lemos estado local stale.
-
   void updateZoneFromBeacon(String? zoneId) {
     if (zoneId == _currentZoneId) return;
     if (_uid == null) return;
@@ -148,10 +141,9 @@ class SmartSpaceProvider extends ChangeNotifier {
     _currentZoneId = zoneId;
 
     if (prev != null) {
-      // Saída: operação atómica no RTDB — não usa estado local
       if (_isConnected) {
         _db?.removeUserFromZoneAtomic(_uid!, prev);
-        _db?.updateUserZone(_uid!, zoneId); // atualiza para a nova (ou null)
+        _db?.updateUserZone(_uid!, zoneId);
       } else {
         _pendingCommands.add(() => _db?.removeUserFromZoneAtomic(_uid!, prev));
         _pendingCommands.add(() => _db?.updateUserZone(_uid!, zoneId));
@@ -170,12 +162,9 @@ class SmartSpaceProvider extends ChangeNotifier {
     }
 
     if (zoneId != null) {
-      // Entrada: operação atómica no RTDB — não usa estado local
       if (_isConnected) {
         _db?.addUserToZoneAtomic(_uid!, zoneId);
         if (prev == null) {
-          // Só chama updateUserZone aqui se não havia zona anterior
-          // (se havia, já foi chamado no bloco de saída acima)
           _db?.updateUserZone(_uid!, zoneId);
         }
       } else {
@@ -243,9 +232,12 @@ class SmartSpaceProvider extends ChangeNotifier {
     final newState = !z.lightOn;
     _updateZone(zoneId, (z) => z.copyWith(lightOn: newState));
     if (_isConnected) {
-      _db?.updateZoneLight(zoneId, newState, z.lightIntensity);
+      _db?.updateZoneLight(zoneId, newState, z.lightIntensity,
+          r: z.lightR, g: z.lightG, b: z.lightB);
     } else {
-      _pendingCommands.add(() => _db?.updateZoneLight(zoneId, newState, z.lightIntensity));
+      _pendingCommands.add(() => _db?.updateZoneLight(
+          zoneId, newState, z.lightIntensity,
+          r: z.lightR, g: z.lightG, b: z.lightB));
     }
     _log(LogEvent(
       id: _uid_(),
@@ -265,10 +257,40 @@ class SmartSpaceProvider extends ChangeNotifier {
     if (z == null) return;
     _updateZone(zoneId, (z) => z.copyWith(lightIntensity: value));
     if (_isConnected) {
-      _db?.updateZoneLight(zoneId, z.lightOn, value);
+      _db?.updateZoneLight(zoneId, z.lightOn, value,
+          r: z.lightR, g: z.lightG, b: z.lightB);
     } else {
-      _pendingCommands.add(() => _db?.updateZoneLight(zoneId, z.lightOn, value));
+      _pendingCommands.add(() => _db?.updateZoneLight(
+          zoneId, z.lightOn, value,
+          r: z.lightR, g: z.lightG, b: z.lightB));
     }
+    notifyListeners();
+  }
+
+  void setLightColor(String zoneId, Color color) {
+    final z = zoneById(zoneId);
+    if (z == null) return;
+    final r = color.red;
+    final g = color.green;
+    final b = color.blue;
+    _updateZone(zoneId, (zone) => zone.copyWith(lightR: r, lightG: g, lightB: b));
+    if (_isConnected) {
+      _db?.updateZoneLight(zoneId, z.lightOn, z.lightIntensity, r: r, g: g, b: b);
+    } else {
+      _pendingCommands.add(() =>
+          _db?.updateZoneLight(zoneId, z.lightOn, z.lightIntensity, r: r, g: g, b: b));
+    }
+    _log(LogEvent(
+      id: _uid_(),
+      type: LogEventType.manualCommand,
+      zoneId: zoneId,
+      message: '$_displayName alterou a cor do LED na ${z.name} '
+          '(R:$r G:$g B:$b)'
+          '${_isConnected ? "" : " (modo autónomo)"}',
+      userName: _displayName,
+      userRole: _appUser?.role.name ?? 'user',
+      uid: _uid ?? '',
+    ));
     notifyListeners();
   }
 
@@ -347,12 +369,19 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   void _applyPreferences(String zoneId) {
     final prefs = _preferences[zoneId];
-    if (prefs == null) return;
-    _updateZone(zoneId, (z) => z.copyWith(lightOn: true, lightIntensity: prefs.lightIntensity));
+    if (prefs == null || !prefs.enabled) return; // ← verifica enabled
+    final r = prefs.lightColor.red;
+    final g = prefs.lightColor.green;
+    final b = prefs.lightColor.blue;
+    _updateZone(zoneId, (z) => z.copyWith(
+        lightOn: true,
+        lightIntensity: prefs.lightIntensity,
+        lightR: r, lightG: g, lightB: b));
     if (_isConnected) {
-      _db?.updateZoneLight(zoneId, true, prefs.lightIntensity);
+      _db?.updateZoneLight(zoneId, true, prefs.lightIntensity, r: r, g: g, b: b);
     } else {
-      _pendingCommands.add(() => _db?.updateZoneLight(zoneId, true, prefs.lightIntensity));
+      _pendingCommands.add(() =>
+          _db?.updateZoneLight(zoneId, true, prefs.lightIntensity, r: r, g: g, b: b));
     }
     _log(LogEvent(
       id: _uid_(),

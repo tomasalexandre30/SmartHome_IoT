@@ -117,6 +117,7 @@ class UserPreferences {
   Color lightColor;
   double temperatureTarget;
   bool doNotDisturb;
+  bool enabled; // ← NOVO
 
   UserPreferences({
     required this.zoneId,
@@ -124,6 +125,7 @@ class UserPreferences {
     this.lightColor = const Color(0xFFFFFFFF),
     this.temperatureTarget = 22.0,
     this.doNotDisturb = false,
+    this.enabled = true, // ← por defeito ativo
   });
 
   UserPreferences copyWith({
@@ -131,12 +133,14 @@ class UserPreferences {
     Color? lightColor,
     double? temperatureTarget,
     bool? doNotDisturb,
+    bool? enabled, // ← NOVO
   }) => UserPreferences(
     zoneId: zoneId,
     lightIntensity: lightIntensity ?? this.lightIntensity,
     lightColor: lightColor ?? this.lightColor,
     temperatureTarget: temperatureTarget ?? this.temperatureTarget,
     doNotDisturb: doNotDisturb ?? this.doNotDisturb,
+    enabled: enabled ?? this.enabled, // ← NOVO
   );
 
   Map<String, dynamic> toJson() => {
@@ -145,6 +149,7 @@ class UserPreferences {
     'lightColorValue': lightColor.value,
     'temperatureTarget': temperatureTarget,
     'doNotDisturb': doNotDisturb,
+    'enabled': enabled, // ← NOVO
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> j) => UserPreferences(
@@ -153,6 +158,7 @@ class UserPreferences {
     lightColor: Color(j['lightColorValue'] as int),
     temperatureTarget: (j['temperatureTarget'] as num).toDouble(),
     doNotDisturb: j['doNotDisturb'] as bool,
+    enabled: j['enabled'] as bool? ?? true, // ← NOVO (null safety para docs antigos)
   );
 }
 
@@ -196,13 +202,14 @@ class Zone {
 
   bool lightOn;
   double lightIntensity;
+  int lightR;
+  int lightG;
+  int lightB;
   bool buzzerOn;
 
   List<AutomationRule> rules;
   double energyUsageWh;
   DateTime lastUpdated;
-
-  // ✅ NOVO: estado online do ESP32 desta zona
   bool esp32Online;
 
   Zone({
@@ -220,6 +227,9 @@ class Zone {
     this.motionDetected,
     this.lightOn = false,
     this.lightIntensity = 1.0,
+    this.lightR = 255,
+    this.lightG = 255,
+    this.lightB = 255,
     this.buzzerOn = false,
     List<AutomationRule>? rules,
     this.energyUsageWh = 0,
@@ -230,6 +240,8 @@ class Zone {
         lastUpdated = lastUpdated ?? DateTime.now();
 
   bool get isOccupied => status == ZoneStatus.occupied;
+
+  Color get lightColor => Color.fromRGBO(lightR, lightG, lightB, 1.0);
 
   String get statusLabel {
     switch (status) {
@@ -257,6 +269,9 @@ class Zone {
     bool? motionDetected,
     bool? lightOn,
     double? lightIntensity,
+    int? lightR,
+    int? lightG,
+    int? lightB,
     bool? buzzerOn,
     double? energyUsageWh,
     bool? esp32Online,
@@ -275,6 +290,9 @@ class Zone {
     motionDetected: motionDetected ?? this.motionDetected,
     lightOn: lightOn ?? this.lightOn,
     lightIntensity: lightIntensity ?? this.lightIntensity,
+    lightR: lightR ?? this.lightR,
+    lightG: lightG ?? this.lightG,
+    lightB: lightB ?? this.lightB,
     buzzerOn: buzzerOn ?? this.buzzerOn,
     rules: rules,
     energyUsageWh: energyUsageWh ?? this.energyUsageWh,

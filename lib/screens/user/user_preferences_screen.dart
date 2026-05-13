@@ -17,9 +17,7 @@ class UserPreferencesScreen extends StatelessWidget {
         final user = auth.appUser;
         final configuredZones = ss.zones.where((z) {
           final p = ss.preferencesFor(z.id);
-          return p.lightIntensity != 0.8 ||
-              p.temperatureTarget != 22.0 ||
-              p.doNotDisturb;
+          return p.enabled;
         }).length;
 
         return Scaffold(
@@ -28,41 +26,36 @@ class UserPreferencesScreen extends StatelessWidget {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             children: [
-
-              // ── Header ─────────────────────────────────────────────
               _HeaderCard(
                 displayName: user?.displayName ?? 'Utilizador',
                 configuredZones: configuredZones,
                 totalZones: ss.zones.length,
               ),
               const SizedBox(height: 24),
-
-              // ── Não incomodar global ───────────────────────────────
               const SectionHeader(title: 'Modo não incomodar'),
               const SizedBox(height: 10),
               _DoNotDisturbCard(zones: ss.zones),
               const SizedBox(height: 24),
-
-              // ── Preferências por zona ──────────────────────────────
               const SectionHeader(title: 'Preferências por zona'),
               const SizedBox(height: 10),
               ...ss.zones.map((z) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _ZonePreferenceCard(zone: z),
               )),
-
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: SS.card(),
                 child: const Row(
                   children: [
-                    Icon(Icons.sync_rounded, color: AppTheme.textMuted, size: 18),
+                    Icon(Icons.sync_rounded,
+                        color: AppTheme.textMuted, size: 18),
                     SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'As preferências são guardadas automaticamente e aplicadas ao entrar numa zona.',
-                        style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                        'As preferências ativas são aplicadas automaticamente ao entrar numa zona.',
+                        style:
+                        TextStyle(color: AppTheme.textMuted, fontSize: 12),
                       ),
                     ),
                   ],
@@ -76,7 +69,7 @@ class UserPreferencesScreen extends StatelessWidget {
   }
 }
 
-// ── Header Card ────────────────────────────────────────────────────────────────
+// ── Header Card ───────────────────────────────────────────────────────────────
 
 class _HeaderCard extends StatelessWidget {
   final String displayName;
@@ -92,63 +85,98 @@ class _HeaderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final initial = displayName[0].toUpperCase();
+    final allActive = configuredZones == totalZones;
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: SS.glowCard(glowColor: AppTheme.accent),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 52, height: 52,
-            decoration: BoxDecoration(
-              color: AppTheme.accent.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: AppTheme.accent.withOpacity(0.25), width: 1.5),
-            ),
-            child: Center(
-              child: Text(initial,
-                  style: const TextStyle(
-                    color: AppTheme.accent,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                  )),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(displayName,
-                    style: const TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    )),
-                const SizedBox(height: 3),
-                const Text(
-                  'Preferências aplicadas ao entrar numa zona.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          Row(
+            children: [
+              Container(
+                width: 52, height: 52,
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                      color: AppTheme.accent.withOpacity(0.25), width: 1.5),
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.accentLight,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppTheme.accentBorder),
-                  ),
-                  child: Text(
-                    '$configuredZones/$totalZones zonas configuradas',
-                    style: const TextStyle(
-                      color: AppTheme.accent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                child: Center(
+                  child: Text(initial,
+                      style: const TextStyle(
+                        color: AppTheme.accent,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      )),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(displayName,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        )),
+                    const SizedBox(height: 3),
+                    const Text(
+                      'Preferências aplicadas ao entrar numa zona.',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary, fontSize: 12),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: allActive
+                                ? AppTheme.success.withOpacity(0.1)
+                                : AppTheme.accentLight,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: allActive
+                                  ? AppTheme.success.withOpacity(0.3)
+                                  : AppTheme.accentBorder,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6, height: 6,
+                                decoration: BoxDecoration(
+                                  color: allActive
+                                      ? AppTheme.success
+                                      : AppTheme.accent,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                '$configuredZones/$totalZones zonas ativas',
+                                style: TextStyle(
+                                  color: allActive
+                                      ? AppTheme.success
+                                      : AppTheme.accent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -156,7 +184,7 @@ class _HeaderCard extends StatelessWidget {
   }
 }
 
-// ── Zone Preference Card ───────────────────────────────────────────────────────
+// ── Zone Preference Card ──────────────────────────────────────────────────────
 
 class _ZonePreferenceCard extends StatefulWidget {
   final Zone zone;
@@ -170,7 +198,8 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
   bool _expanded = false;
   bool _saved = false;
 
-  void _saveWithFeedback(BuildContext context, SmartSpaceProvider ss, UserPreferences prefs) {
+  void _saveWithFeedback(
+      BuildContext context, SmartSpaceProvider ss, UserPreferences prefs) {
     ss.updatePreferences(prefs);
     setState(() => _saved = true);
     Future.delayed(const Duration(seconds: 2), () {
@@ -183,16 +212,15 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
     final ss = context.watch<SmartSpaceProvider>();
     final prefs = ss.preferencesFor(widget.zone.id);
     final z = widget.zone;
-    final hasCustomPrefs = prefs.lightIntensity != 0.8 ||
-        prefs.temperatureTarget != 22.0 ||
-        prefs.doNotDisturb;
+    final isEnabled = prefs.enabled;
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
       decoration: SS.card(
           accentColor: _expanded
               ? z.color
-              : hasCustomPrefs
-              ? z.color.withOpacity(0.5)
+              : isEnabled
+              ? z.color.withOpacity(0.4)
               : null),
       child: Column(
         children: [
@@ -206,10 +234,14 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: z.color.withOpacity(0.15),
+                      color: isEnabled
+                          ? z.color.withOpacity(0.15)
+                          : AppTheme.surface,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(z.icon, color: z.color, size: 20),
+                    child: Icon(z.icon,
+                        color: isEnabled ? z.color : AppTheme.textMuted,
+                        size: 20),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -219,40 +251,57 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
                         Row(
                           children: [
                             Text(z.name,
-                                style: const TextStyle(
-                                    color: AppTheme.textPrimary,
+                                style: TextStyle(
+                                    color: isEnabled
+                                        ? AppTheme.textPrimary
+                                        : AppTheme.textMuted,
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700)),
-                            if (hasCustomPrefs) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: z.color.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(4),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isEnabled
+                                    ? z.color.withOpacity(0.1)
+                                    : AppTheme.surface,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: isEnabled
+                                      ? z.color.withOpacity(0.3)
+                                      : AppTheme.border,
                                 ),
-                                child: Text('Personalizado',
-                                    style: TextStyle(
-                                        color: z.color,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700)),
                               ),
-                            ],
+                              child: Text(
+                                isEnabled ? 'Ativo' : 'Inativo',
+                                style: TextStyle(
+                                    color: isEnabled
+                                        ? z.color
+                                        : AppTheme.textMuted,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Luz: ${(prefs.lightIntensity * 100).toInt()}% · Temp: ${prefs.temperatureTarget.toStringAsFixed(0)}°C',
-                          style: const TextStyle(
-                              color: AppTheme.textMuted, fontSize: 12),
+                          isEnabled
+                              ? 'Luz: ${(prefs.lightIntensity * 100).toInt()}% · Temp: ${prefs.temperatureTarget.toStringAsFixed(0)}°C'
+                              : 'Preferências desativadas para esta zona',
+                          style: TextStyle(
+                              color: isEnabled
+                                  ? AppTheme.textMuted
+                                  : AppTheme.textMuted.withOpacity(0.5),
+                              fontSize: 12),
                         ),
                       ],
                     ),
                   ),
                   if (_saved)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: AppTheme.successLight,
                         borderRadius: BorderRadius.circular(6),
@@ -260,7 +309,8 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.check_rounded, color: AppTheme.success, size: 12),
+                          Icon(Icons.check_rounded,
+                              color: AppTheme.success, size: 12),
                           SizedBox(width: 4),
                           Text('Guardado',
                               style: TextStyle(
@@ -269,20 +319,12 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
                                   fontWeight: FontWeight.w700)),
                         ],
                       ),
-                    )
-                  else if (prefs.doNotDisturb)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: SS.pill(color: AppTheme.textMuted),
-                      child: const Text('DND',
-                          style: TextStyle(
-                              color: AppTheme.textMuted,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700)),
                     ),
                   const SizedBox(width: 8),
                   Icon(
-                    _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
                     color: AppTheme.textMuted,
                   ),
                 ],
@@ -296,68 +338,48 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _PrefRow(
-                    icon: Icons.lightbulb_rounded,
-                    label: 'Intensidade de luz',
-                    valueLabel: '${(prefs.lightIntensity * 100).toInt()}%',
-                    color: AppTheme.warning,
-                    child: Slider(
-                      value: prefs.lightIntensity,
-                      onChanged: (v) => _saveWithFeedback(
-                          context, ss, prefs.copyWith(lightIntensity: v)),
-                      activeColor: AppTheme.warning,
-                      inactiveColor: AppTheme.border,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _PrefRow(
-                    icon: Icons.thermostat_rounded,
-                    label: 'Temperatura preferida',
-                    valueLabel: '${prefs.temperatureTarget.toStringAsFixed(0)}°C',
-                    color: AppTheme.error,
-                    child: Slider(
-                      value: prefs.temperatureTarget,
-                      min: 16, max: 30,
-                      onChanged: (v) => _saveWithFeedback(
-                          context, ss, prefs.copyWith(temperatureTarget: v)),
-                      activeColor: AppTheme.error,
-                      inactiveColor: AppTheme.border,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _ColorPicker(
-                    prefs: prefs,
-                    onColorSelected: (color) => _saveWithFeedback(
-                        context, ss, prefs.copyWith(lightColor: color)),
-                  ),
-                  const SizedBox(height: 8),
+                  // ── Toggle ativar/desativar ────────────────────────────
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: SS.card(),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isEnabled
+                          ? z.color.withOpacity(0.06)
+                          : AppTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isEnabled
+                            ? z.color.withOpacity(0.2)
+                            : AppTheme.border,
+                      ),
+                    ),
                     child: Row(
                       children: [
-                        Icon(
-                          Icons.do_not_disturb_on_rounded,
-                          color: prefs.doNotDisturb ? AppTheme.error : AppTheme.textMuted,
-                          size: 18,
-                        ),
+                        Icon(Icons.tune_rounded,
+                            color:
+                            isEnabled ? z.color : AppTheme.textMuted,
+                            size: 18),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Não incomodar',
-                                  style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600)),
                               Text(
-                                prefs.doNotDisturb
-                                    ? 'Notificações bloqueadas nesta zona'
-                                    : 'Bloqueia notificações de entrada',
+                                'Usar preferências nesta zona',
                                 style: TextStyle(
-                                    color: prefs.doNotDisturb
-                                        ? AppTheme.error
+                                    color: isEnabled
+                                        ? AppTheme.textPrimary
+                                        : AppTheme.textMuted,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                isEnabled
+                                    ? 'Aplicado automaticamente ao entrar'
+                                    : 'Sem configuração automática',
+                                style: TextStyle(
+                                    color: isEnabled
+                                        ? z.color
                                         : AppTheme.textMuted,
                                     fontSize: 11),
                               ),
@@ -365,31 +387,132 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
                           ),
                         ),
                         Switch(
-                          value: prefs.doNotDisturb,
+                          value: isEnabled,
                           onChanged: (v) => _saveWithFeedback(
-                              context, ss, prefs.copyWith(doNotDisturb: v)),
+                              context, ss, prefs.copyWith(enabled: v)),
+                          activeColor: z.color,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  if (hasCustomPrefs)
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _saveWithFeedback(
-                            context, ss, UserPreferences(zoneId: z.id)),
-                        icon: const Icon(Icons.restart_alt_rounded,
-                            color: AppTheme.textMuted, size: 16),
-                        label: const Text('Repor predefinições',
-                            style: TextStyle(color: AppTheme.textMuted)),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: AppTheme.border),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+
+                  AnimatedCrossFade(
+                    duration: const Duration(milliseconds: 200),
+                    crossFadeState: isEnabled
+                        ? CrossFadeState.showFirst
+                        : CrossFadeState.showSecond,
+                    firstChild: Column(
+                      children: [
+                        const SizedBox(height: 10),
+                        _PrefRow(
+                          icon: Icons.lightbulb_rounded,
+                          label: 'Intensidade de luz',
+                          valueLabel:
+                          '${(prefs.lightIntensity * 100).toInt()}%',
+                          color: AppTheme.warning,
+                          child: Slider(
+                            value: prefs.lightIntensity,
+                            onChanged: (v) => _saveWithFeedback(context,
+                                ss, prefs.copyWith(lightIntensity: v)),
+                            activeColor: AppTheme.warning,
+                            inactiveColor: AppTheme.border,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 8),
+                        _PrefRow(
+                          icon: Icons.thermostat_rounded,
+                          label: 'Temperatura preferida',
+                          valueLabel:
+                          '${prefs.temperatureTarget.toStringAsFixed(0)}°C',
+                          color: AppTheme.error,
+                          child: Slider(
+                            value: prefs.temperatureTarget,
+                            min: 16,
+                            max: 30,
+                            onChanged: (v) => _saveWithFeedback(context,
+                                ss, prefs.copyWith(temperatureTarget: v)),
+                            activeColor: AppTheme.error,
+                            inactiveColor: AppTheme.border,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        _ColorPickerCard(
+                          prefs: prefs,
+                          onColorChanged: (color) => _saveWithFeedback(
+                              context, ss, prefs.copyWith(lightColor: color)),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: SS.card(),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.do_not_disturb_on_rounded,
+                                color: prefs.doNotDisturb
+                                    ? AppTheme.error
+                                    : AppTheme.textMuted,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Não incomodar',
+                                        style: TextStyle(
+                                            color: AppTheme.textPrimary,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600)),
+                                    Text(
+                                      prefs.doNotDisturb
+                                          ? 'Notificações bloqueadas nesta zona'
+                                          : 'Bloqueia notificações de entrada',
+                                      style: TextStyle(
+                                          color: prefs.doNotDisturb
+                                              ? AppTheme.error
+                                              : AppTheme.textMuted,
+                                          fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: prefs.doNotDisturb,
+                                onChanged: (v) => _saveWithFeedback(context,
+                                    ss, prefs.copyWith(doNotDisturb: v)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _saveWithFeedback(
+                                context,
+                                ss,
+                                UserPreferences(
+                                    zoneId: z.id, enabled: true)),
+                            icon: const Icon(Icons.restart_alt_rounded,
+                                color: AppTheme.textMuted, size: 16),
+                            label: const Text('Repor predefinições',
+                                style: TextStyle(
+                                    color: AppTheme.textMuted)),
+                            style: OutlinedButton.styleFrom(
+                              side:
+                              const BorderSide(color: AppTheme.border),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                    secondChild: const SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),
@@ -400,7 +523,7 @@ class _ZonePreferenceCardState extends State<_ZonePreferenceCard> {
   }
 }
 
-// ── Pref Row ───────────────────────────────────────────────────────────────────
+// ── Pref Row ──────────────────────────────────────────────────────────────────
 
 class _PrefRow extends StatelessWidget {
   final IconData icon;
@@ -434,7 +557,9 @@ class _PrefRow extends StatelessWidget {
             ),
             Text(valueLabel,
                 style: TextStyle(
-                    color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700)),
           ],
         ),
         child,
@@ -443,101 +568,307 @@ class _PrefRow extends StatelessWidget {
   );
 }
 
-// ── Color Picker ───────────────────────────────────────────────────────────────
+// ── Preset Color ──────────────────────────────────────────────────────────────
 
-class _ColorPicker extends StatelessWidget {
+class _PresetColor {
+  final String name;
+  final Color color;
+  const _PresetColor(this.name, this.color);
+}
+
+// ── Color Picker Card ─────────────────────────────────────────────────────────
+
+class _ColorPickerCard extends StatelessWidget {
   final UserPreferences prefs;
-  final ValueChanged<Color> onColorSelected;
+  final ValueChanged<Color> onColorChanged;
 
-  const _ColorPicker({required this.prefs, required this.onColorSelected});
+  const _ColorPickerCard({
+    required this.prefs,
+    required this.onColorChanged,
+  });
 
-  static const _colors = [
-    (Color(0xFFFFFFFF), 'Branco'),
-    (Color(0xFFFFF3B0), 'Quente'),
-    (Color(0xFFFFD6A5), 'Âmbar'),
-    (Color(0xFFCBF3F0), 'Frio'),
-    (Color(0xFFA8DADC), 'Azul'),
-    (Color(0xFFFFADAD), 'Rosa'),
+  static const List<_PresetColor> _presets = [
+    _PresetColor('Branco',   Color(0xFFFFFFFF)),
+    _PresetColor('Vermelho', Color(0xFFFF0000)),
+    _PresetColor('Verde',    Color(0xFF00FF00)),
+    _PresetColor('Azul',     Color(0xFF0000FF)),
+    _PresetColor('Amarelo',  Color(0xFFFFFF00)),
+    _PresetColor('Ciano',    Color(0xFF00FFFF)),
+    _PresetColor('Magenta',  Color(0xFFFF00FF)),
+    _PresetColor('Laranja',  Color(0xFFFF6600)),
+    _PresetColor('Roxo',     Color(0xFF8800FF)),
+    _PresetColor('Rosa',     Color(0xFFFF0088)),
   ];
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: SS.card(),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.palette_rounded, color: AppTheme.accent, size: 16),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text('Cor de luz preferida',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-            ),
-            Container(
-              width: 20, height: 20,
-              decoration: BoxDecoration(
-                color: prefs.lightColor,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppTheme.border),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8, runSpacing: 8,
-          children: _colors.map((c) {
-            final (color, label) = c;
-            final selected = prefs.lightColor.value == color.value;
-            return GestureDetector(
-              onTap: () => onColorSelected(color),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+  Widget build(BuildContext context) {
+    final currentColor = prefs.lightColor;
+    final isWhite = currentColor.red > 200 &&
+        currentColor.green > 200 &&
+        currentColor.blue > 200;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: SS.card(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header ───────────────────────────────────────────────────────
+          Row(
+            children: [
+              Container(
+                width: 32, height: 32,
                 decoration: BoxDecoration(
-                  color: selected ? color.withOpacity(0.6) : color.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(20),
+                  color: isWhite
+                      ? const Color(0xFF2C2C2C)
+                      : currentColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: selected ? AppTheme.accent : AppTheme.border,
-                    width: selected ? 2 : 1,
+                    color: isWhite
+                        ? const Color(0xFF555555)
+                        : currentColor.withOpacity(0.5),
+                    width: 1.5,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 12, height: 12,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppTheme.border),
-                      ),
+                child: Icon(Icons.palette_rounded,
+                    color: isWhite ? Colors.white : currentColor, size: 16),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('Cor de luz preferida',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+              ),
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: currentColor,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isWhite
+                        ? const Color(0xFF999999)
+                        : currentColor.withOpacity(0.5),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isWhite
+                          ? Colors.grey.withOpacity(0.3)
+                          : currentColor.withOpacity(0.5),
+                      blurRadius: 10,
+                      spreadRadius: 1,
                     ),
-                    const SizedBox(width: 6),
-                    Text(label,
-                        style: TextStyle(
-                          color: selected ? AppTheme.accent : AppTheme.textSecondary,
-                          fontSize: 12,
-                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        )),
-                    if (selected) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.check_rounded, color: AppTheme.accent, size: 12),
-                    ],
                   ],
                 ),
               ),
-            );
-          }).toList(),
-        ),
-      ],
-    ),
-  );
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── Presets ───────────────────────────────────────────────────────
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _presets.map((preset) {
+              final isSelected =
+                  currentColor.red == preset.color.red &&
+                      currentColor.green == preset.color.green &&
+                      currentColor.blue == preset.color.blue;
+              final isPresetWhite = preset.color == Colors.white;
+
+              return GestureDetector(
+                onTap: () => onColorChanged(preset.color),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isPresetWhite
+                        ? (isSelected
+                        ? const Color(0xFF2C2C2C)
+                        : const Color(0xFFE8E8E8))
+                        : preset.color
+                        .withOpacity(isSelected ? 0.25 : 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isPresetWhite
+                          ? (isSelected
+                          ? const Color(0xFF888888)
+                          : const Color(0xFFCCCCCC))
+                          : (isSelected
+                          ? preset.color.withOpacity(0.8)
+                          : preset.color.withOpacity(0.3)),
+                      width: isSelected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 10, height: 10,
+                        decoration: BoxDecoration(
+                          color: preset.color,
+                          shape: BoxShape.circle,
+                          border: isPresetWhite
+                              ? Border.all(
+                              color: const Color(0xFFAAAAAA), width: 1)
+                              : null,
+                          boxShadow: isSelected
+                              ? [
+                            BoxShadow(
+                              color: isPresetWhite
+                                  ? Colors.grey.withOpacity(0.5)
+                                  : preset.color.withOpacity(0.6),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            )
+                          ]
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        preset.name,
+                        style: TextStyle(
+                          color: isPresetWhite
+                              ? (isSelected
+                              ? Colors.white
+                              : AppTheme.textPrimary)
+                              : preset.color,
+                          fontSize: 12,
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Sliders RGB ───────────────────────────────────────────────────
+          _RgbSliderRow(
+            label: 'R',
+            value: currentColor.red,
+            color: const Color(0xFFFF3333),
+            onChanged: (v) => onColorChanged(
+                Color.fromRGBO(v, currentColor.green, currentColor.blue, 1.0)),
+          ),
+          const SizedBox(height: 8),
+          _RgbSliderRow(
+            label: 'G',
+            value: currentColor.green,
+            color: const Color(0xFF22CC22),
+            onChanged: (v) => onColorChanged(
+                Color.fromRGBO(currentColor.red, v, currentColor.blue, 1.0)),
+          ),
+          const SizedBox(height: 8),
+          _RgbSliderRow(
+            label: 'B',
+            value: currentColor.blue,
+            color: const Color(0xFF3366FF),
+            onChanged: (v) => onColorChanged(
+                Color.fromRGBO(currentColor.red, currentColor.green, v, 1.0)),
+          ),
+          const SizedBox(height: 12),
+
+          // ── RGB display ───────────────────────────────────────────────────
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Text(
+                'RGB(${currentColor.red}, ${currentColor.green}, ${currentColor.blue})',
+                style: const TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// ── Do Not Disturb Card ────────────────────────────────────────────────────────
+// ── RGB Slider Row ────────────────────────────────────────────────────────────
+
+class _RgbSliderRow extends StatelessWidget {
+  final String label;
+  final int value;
+  final Color color;
+  final ValueChanged<int> onChanged;
+
+  const _RgbSliderRow({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 16,
+          child: Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape:
+              const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape:
+              const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: Slider(
+              value: value.toDouble(),
+              min: 0,
+              max: 255,
+              onChanged: (v) => onChanged(v.toInt()),
+              activeColor: color,
+              inactiveColor: AppTheme.border,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 30,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+                color: AppTheme.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Do Not Disturb Card ───────────────────────────────────────────────────────
 
 class _DoNotDisturbCard extends StatelessWidget {
   final List<Zone> zones;
@@ -546,8 +877,10 @@ class _DoNotDisturbCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ss = context.watch<SmartSpaceProvider>();
-    final anyDnd = zones.any((z) => ss.preferencesFor(z.id).doNotDisturb);
-    final dndCount = zones.where((z) => ss.preferencesFor(z.id).doNotDisturb).length;
+    final anyDnd =
+    zones.any((z) => ss.preferencesFor(z.id).doNotDisturb);
+    final dndCount =
+        zones.where((z) => ss.preferencesFor(z.id).doNotDisturb).length;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -558,9 +891,12 @@ class _DoNotDisturbCard extends StatelessWidget {
             children: [
               Container(
                 width: 44, height: 44,
-                decoration: SS.iconBox(color: anyDnd ? AppTheme.error : AppTheme.accent),
+                decoration: SS.iconBox(
+                    color: anyDnd ? AppTheme.error : AppTheme.accent),
                 child: Icon(
-                  anyDnd ? Icons.do_not_disturb_on_rounded : Icons.notifications_active_rounded,
+                  anyDnd
+                      ? Icons.do_not_disturb_on_rounded
+                      : Icons.notifications_active_rounded,
                   color: anyDnd ? AppTheme.error : AppTheme.accent,
                   size: 20,
                 ),
@@ -580,7 +916,9 @@ class _DoNotDisturbCard extends StatelessWidget {
                           ? '$dndCount zona${dndCount != 1 ? "s" : ""} com DND ativo'
                           : 'Bloqueia notificações em todas as zonas',
                       style: TextStyle(
-                          color: anyDnd ? AppTheme.error : AppTheme.textMuted,
+                          color: anyDnd
+                              ? AppTheme.error
+                              : AppTheme.textMuted,
                           fontSize: 11),
                     ),
                   ],
@@ -618,11 +956,13 @@ class _DoNotDisturbCard extends StatelessWidget {
                   const SizedBox(width: 10),
                   Text(z.name,
                       style: const TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 13)),
+                          color: AppTheme.textSecondary,
+                          fontSize: 13)),
                   const Spacer(),
                   GestureDetector(
-                    onTap: () => ss.updatePreferences(
-                        ss.preferencesFor(z.id).copyWith(doNotDisturb: false)),
+                    onTap: () => ss.updatePreferences(ss
+                        .preferencesFor(z.id)
+                        .copyWith(doNotDisturb: false)),
                     child: const Icon(Icons.close_rounded,
                         color: AppTheme.textMuted, size: 16),
                   ),

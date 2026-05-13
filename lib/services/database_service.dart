@@ -92,16 +92,23 @@ class DatabaseService extends ChangeNotifier {
     });
   }
 
-  Future<void> updateZoneLight(String zoneId, bool on, double intensity) async {
+  Future<void> updateZoneLight(String zoneId, bool on, double intensity,
+      {int r = 255, int g = 255, int b = 255}) async {
     try {
       await _zoneRef(zoneId).update({
         'lightOn': on,
         'lightIntensity': intensity,
+        'lightR': r,
+        'lightG': g,
+        'lightB': b,
         'lastUpdated': rtdb.ServerValue.timestamp,
       });
       await _db.ref('smartspace/commands/$zoneId').update({
         'lightOn': on,
         'lightIntensity': intensity,
+        'lightR': r,
+        'lightG': g,
+        'lightB': b,
       });
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar luz: $e');
