@@ -67,6 +67,10 @@ class DatabaseService extends ChangeNotifier {
     'lastUpdated': rtdb.ServerValue.timestamp,
     'esp32Online': false,
     'esp32LastSeen': 0,
+    'automations': const ZoneAutomations().toJson(),
+    'lightMode': 'auto',
+    'absoluteLocked': false,
+    'absoluteLockedBy': null,
   };
 
   Stream<List<ZoneUpdate>> zonesStream() {
@@ -86,6 +90,32 @@ class DatabaseService extends ChangeNotifier {
         final esp32OnlineFlag = zoneData['esp32Online'] as bool? ?? false;
         final isAlive = esp32OnlineFlag && (now - lastMs) < 30000;
         zoneData['esp32Online'] = isAlive;
+
+        // Garantir que automations é um Map<String, dynamic> se existir
+        if (zoneData['automations'] != null) {
+          try {
+            zoneData['automations'] = Map<String, dynamic>.from(
+              zoneData['automations'] as Map,
+            );
+          } catch (_) {
+            zoneData['automations'] = null;
+          }
+        }
+
+        // Garantir que activePoll é um Map<String, dynamic> se existir
+        if (zoneData['activePoll'] != null) {
+          try {
+            final pollMap = Map<String, dynamic>.from(zoneData['activePoll'] as Map);
+            // Converter votes para Map<String, bool>
+            if (pollMap['votes'] != null) {
+              pollMap['votes'] = Map<String, bool>.from(
+                  (pollMap['votes'] as Map).map((k, v) => MapEntry(k.toString(), v as bool)));
+            }
+            zoneData['activePoll'] = pollMap;
+          } catch (_) {
+            zoneData['activePoll'] = null;
+          }
+        }
 
         return ZoneUpdate(zoneId: zoneId, data: zoneData);
       }).toList();
@@ -127,21 +157,74 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
+  // ── Automações ─────────────────────────────────────────────────────────────
+
+  Future<void> updateZoneAutomations(String zoneId, ZoneAutomations automations) async {
+    try {
+      await _zoneRef(zoneId).child('automations').update(automations.toJson());
+    } catch (e) {
+      debugPrint('[DB] Erro ao atualizar automações: $e');
+    }
+  }
+
+  // ── Controlo de luz — modo global ─────────────────────────────────────────
+
+  Future<void> updateZoneLightMode(String zoneId, LightMode mode) async {
+    try {
+      await _zoneRef(zoneId).update({
+        'lightMode': mode == LightMode.manual ? 'manual' : 'auto',
+        'lastUpdated': rtdb.ServerValue.timestamp,
+      });
+    } catch (e) {
+      debugPrint('[DB] Erro ao atualizar modo de luz: $e');
+    }
+  }
+
+  Future<void> updateZoneAbsoluteMode(String zoneId, bool active, String? lockedByUid) async {
+    try {
+      await _zoneRef(zoneId).update({
+        'absoluteLocked': active,
+        'absoluteLockedBy': lockedByUid,
+        'lastUpdated': rtdb.ServerValue.timestamp,
+      });
+    } catch (e) {
+      debugPrint('[DB] Erro ao atualizar modo absoluto: $e');
+    }
+  }
+
+  // ── Poll ───────────────────────────────────────────────────────────────────
+
+  Future<void> openPoll(String zoneId, ZonePoll poll) async {
+    try {
+      await _zoneRef(zoneId).child('activePoll').set(poll.toJson());
+    } catch (e) {
+      debugPrint('[DB] Erro ao abrir poll: $e');
+    }
+  }
+
+  Future<void> votePoll(String zoneId, String uid, bool vote) async {
+    try {
+      await _zoneRef(zoneId).child('activePoll/votes/$uid').set(vote);
+    } catch (e) {
+      debugPrint('[DB] Erro ao votar na poll: $e');
+    }
+  }
+
+  Future<void> closePoll(String zoneId) async {
+    try {
+      await _zoneRef(zoneId).child('activePoll').remove();
+    } catch (e) {
+      debugPrint('[DB] Erro ao fechar poll: $e');
+    }
+  }
+
   // ── OPERAÇÕES ATÓMICAS COM TRANSACTION ─────────────────────────────────────
 
-  /// Adiciona um utilizador à zona usando Transaction atómica.
-  ///
-  /// NOTA CRÍTICA: quando presentUsers está vazio no RTDB, o Firebase
-  /// guarda-o como `null` (não como `{}`). O runTransaction recebe
-  /// currentData == null nesse caso. NÃO devemos fazer abort — devemos
-  /// tratar null como mapa vazio e adicionar o uid.
   Future<void> addUserToZoneAtomic(String uid, String zoneId) async {
     try {
       final presentUsersRef = _zoneRef(zoneId).child('presentUsers');
 
       final result = await presentUsersRef.runTransaction((currentData) {
-        // ✅ null significa nó vazio (Firebase remove nós com valor {})
-        // Nunca fazer abort em null — criar o mapa com o uid
         final users = currentData != null
             ? Map<String, dynamic>.from(currentData as Map)
             : <String, dynamic>{};
@@ -161,7 +244,6 @@ class DatabaseService extends ChangeNotifier {
         return;
       }
 
-      // Transaction comprometida — atualiza count e status
       final snap = await _zoneRef(zoneId).child('presentUsers').get();
       final newCount = snap.exists && snap.value is Map
           ? (snap.value as Map).length
@@ -179,13 +261,11 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  /// Remove um utilizador da zona usando Transaction atómica.
   Future<void> removeUserFromZoneAtomic(String uid, String zoneId) async {
     try {
       final presentUsersRef = _zoneRef(zoneId).child('presentUsers');
 
       final result = await presentUsersRef.runTransaction((currentData) {
-        // null = zona já vazia, nada a remover
         if (currentData == null) {
           debugPrint('[DB] removeTransaction: presentUsers null em $zoneId — abort');
           return rtdb.Transaction.abort();
@@ -198,8 +278,6 @@ class DatabaseService extends ChangeNotifier {
         }
 
         users.remove(uid);
-        // ✅ Se o mapa ficou vazio, retorna null explicitamente
-        // para o Firebase remover o nó (em vez de guardar {})
         return rtdb.Transaction.success(users.isEmpty ? null : users);
       });
 
@@ -207,7 +285,6 @@ class DatabaseService extends ChangeNotifier {
         return;
       }
 
-      // Transaction comprometida — atualiza count e status
       final snap = await _zoneRef(zoneId).child('presentUsers').get();
       final remaining = snap.exists && snap.value is Map
           ? (snap.value as Map).length
@@ -225,7 +302,6 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  /// Remove o uid de TODAS as zonas onde apareça.
   Future<void> removeUserFromAllZones(String uid) async {
     try {
       final zonesSnap = await _zonesRef().get();
@@ -271,10 +347,10 @@ class DatabaseService extends ChangeNotifier {
       final updates = <String, dynamic>{
         'lastUpdated': rtdb.ServerValue.timestamp,
       };
-      if (luminosity != null) updates['luminosity'] = luminosity;
-      if (temperature != null) updates['temperature'] = temperature;
-      if (humidity != null) updates['humidity'] = humidity;
-      if (motionDetected != null) updates['motionDetected'] = motionDetected;
+      if (luminosity != null)      updates['luminosity'] = luminosity;
+      if (temperature != null)     updates['temperature'] = temperature;
+      if (humidity != null)        updates['humidity'] = humidity;
+      if (motionDetected != null)  updates['motionDetected'] = motionDetected;
       await _zoneRef(zoneId).update(updates);
     } catch (e) {
       debugPrint('[DB] Erro ao atualizar sensores: $e');
@@ -529,6 +605,25 @@ class DatabaseService extends ChangeNotifier {
       });
     } catch (e) {
       debugPrint('[DB] Erro ao marcar offline: $e');
+    }
+  }
+
+  Future<void> submitCounterProposal(String zoneId, String uid, {
+    double? intensity, int? r, int? g, int? b,
+  }) async {
+    try {
+      final updates = <String, dynamic>{};
+      if (intensity != null) {
+        updates['activePoll/counterProposals/$uid'] = intensity;
+      }
+      if (r != null && g != null && b != null) {
+        updates['activePoll/colorCounterProposals/$uid'] = [r, g, b];
+      }
+      if (updates.isNotEmpty) {
+        await _zoneRef(zoneId).update(updates);
+      }
+    } catch (e) {
+      debugPrint('[DB] Erro ao submeter contra-proposta: $e');
     }
   }
 }
