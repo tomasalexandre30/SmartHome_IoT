@@ -11,6 +11,8 @@ import 'services/beacon_service.dart';
 import 'services/smartspace_provider.dart';
 import 'services/auth_service.dart';
 import 'services/database_service.dart';
+import 'services/notification_service.dart';           // ← NOVO
+import 'widgets/in_app_notification_overlay.dart';     // ← NOVO
 import 'screens/login_screen.dart';
 import 'screens/user/user_shell.dart';
 import 'screens/admin/admin_shell.dart';
@@ -23,6 +25,10 @@ void main() async {
   ));
   await Firebase.initializeApp();
   await _requestPermissions();
+
+  // ── NOVO: carrega a preferência de notificações antes do runApp ───────────
+  await NotificationService.instance.loadPreferences();
+
   runApp(const SmartSpaceApp());
 }
 
@@ -50,11 +56,19 @@ class SmartSpaceApp extends StatelessWidget {
           ble.registerBeacons(DefaultData.beacons());
           return ble;
         }),
+        // ── NOVO: expõe o NotificationService como provider ──────────────
+        ChangeNotifierProvider<NotificationService>.value(
+          value: NotificationService.instance,
+        ),
       ],
       child: MaterialApp(
         title: 'SmartSpace',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.dark,
+        // ── NOVO: envolve toda a app com o overlay de notificações ───────
+        builder: (context, child) => InAppNotificationOverlay(
+          child: child ?? const SizedBox.shrink(),
+        ),
         home: const _AuthGate(),
       ),
     );
@@ -190,7 +204,6 @@ class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
   bool _loading = true;
   String? _uid;
 
-  // Timer para reavaliar ESP32 online status a cada 10s
   Timer? _esp32HeartbeatTimer;
 
   @override
@@ -255,9 +268,11 @@ class _RoleGateState extends State<_RoleGate> with WidgetsBindingObserver {
       final ss = context.read<SmartSpaceProvider>();
       await db.initialize(uid);
       ss.attachDatabase(db, uid, auth.appUser);
-      // ✅ NÃO adiciona listener BLE aqui — o AdminShell e UserShell
-      // já têm os seus próprios listeners. Adicionar aqui criaria
-      // listeners duplicados → utilizador entrava 2-3x na mesma zona.
+
+      // ── NOVO: regista o nome do próprio utilizador no cache ──────────────
+      if (auth.appUser?.displayName != null) {
+        ss.registerUserName(uid, auth.appUser!.displayName);
+      }
     }
 
     if (mounted) {

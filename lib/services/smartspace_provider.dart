@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import 'database_service.dart';
 import 'auth_service.dart';
+import 'notification_service.dart';  // ← NOVO
 
 class SmartSpaceProvider extends ChangeNotifier {
   List<Zone> _zones = DefaultData.zones();
@@ -38,6 +39,10 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   // ── IDs de polls já resolvidas — evita re-processar se Firebase atrasa ────
   final Set<String> _resolvedPollIds = {};
+
+  // ── NOVO: snapshot anterior de presentUsers por zona ─────────────────────
+  // Usado para detetar quem entrou/saiu entre dois updates do Firebase
+  final Map<String, Set<String>> _prevPresentUsers = {};
 
   DatabaseService? _db;
   String? _uid;
@@ -105,17 +110,10 @@ class SmartSpaceProvider extends ChangeNotifier {
         poll = ZonePoll.fromJson(
             Map<String, dynamic>.from(d['activePoll'] as Map));
 
-        // Ignorar polls expiradas ou já resolvidas localmente
         final pollId = '${poll.requestedBy}_${poll.expiresAt.millisecondsSinceEpoch}';
         if (poll.isExpired || _resolvedPollIds.contains(pollId)) {
           poll = null;
         } else {
-          // ── BUG FIX: Opção A ──────────────────────────────────────────────
-          // O device que resolveu a poll (ex: o user) já apagou o nó do Firebase,
-          // mas este device (ex: o admin) pode receber um update intermédio com
-          // todos os votos preenchidos mas antes do nó ser apagado.
-          // Verificamos aqui se todos já votaram — se sim, marcamos como resolvida
-          // localmente e descartamos a poll, sem esperar pelo próximo stream event.
           final presentUsers = d['presentUsers'] != null
               ? List<String>.from(
               (d['presentUsers'] as Map).keys.map((k) => k.toString()))
@@ -127,31 +125,63 @@ class SmartSpaceProvider extends ChangeNotifier {
           final voted = poll.votes.length;
 
           if (totalExpected > 0 && voted >= totalExpected) {
-            // Todos já votaram — esta poll já foi ou está prestes a ser resolvida
-            // noutro device. Marcamos como resolvida aqui para não bloquear o admin.
             debugPrint(
                 '[POLL][FIX] Todos votaram ($voted/$totalExpected) — descartando poll no _applyZoneUpdate');
             _markPollResolved(poll);
-
-            // CRÍTICO: capturar poll numa variável local ANTES de a anular.
-            // O closure do addPostFrameCallback captura a referência à variável
-            // poll — se usarmos poll! depois de poll=null, o Dart lança null check
-            // failed em runtime e _checkPollResult nunca é chamado no admin.
             final pollSnapshot = poll;
-            poll = null; // anular ANTES do callback — banner desaparece imediatamente
-
-            // Se este device é quem pediu a poll (admin remoto), resolve localmente
-            // para aplicar o resultado (ex: mudar modo AUTO).
+            poll = null;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _checkPollResult(update.zoneId, pollSnapshot);
             });
           }
-          // ── fim BUG FIX ───────────────────────────────────────────────────
         }
       } catch (_) {}
     }
 
-    // Parse lightMode global
+    // ── NOVO: detetar entradas/saídas para notificações ───────────────────
+    final newPresentSet = d['presentUsers'] != null
+        ? Set<String>.from(
+        (d['presentUsers'] as Map).keys.map((k) => k.toString()))
+        : <String>{};
+
+    final prevSet = _prevPresentUsers[update.zoneId] ?? {};
+
+    // Só processa se já tínhamos um snapshot anterior (evita notificações
+    // espúrias no arranque quando ainda não há dados locais)
+    if (_prevPresentUsers.containsKey(update.zoneId)) {
+      final zone = _zones.firstWhere(
+            (z) => z.id == update.zoneId,
+        orElse: () => _zones.first,
+      );
+
+      final entered = newPresentSet.difference(prevSet);
+      final exited  = prevSet.difference(newPresentSet);
+
+      for (final enteredUid in entered) {
+        // Não notifica o próprio utilizador sobre si mesmo
+        if (enteredUid == _uid) continue;
+
+        // Admin recebe notificações de todas as zonas.
+        // User só recebe se está na mesma zona.
+        final shouldNotify = isAdmin || _currentZoneId == update.zoneId;
+        if (!shouldNotify) continue;
+
+        _fireEntryNotification(enteredUid, zone, isEntry: true);
+      }
+
+      for (final exitedUid in exited) {
+        if (exitedUid == _uid) continue;
+        final shouldNotify = isAdmin || _currentZoneId == update.zoneId;
+        if (!shouldNotify) continue;
+
+        _fireEntryNotification(exitedUid, zone, isEntry: false);
+      }
+    }
+
+    // Guarda o snapshot atual para comparação no próximo update
+    _prevPresentUsers[update.zoneId] = Set<String>.from(newPresentSet);
+    // ── fim NOVO ──────────────────────────────────────────────────────────
+
     LightMode lightMode = LightMode.auto;
     final lightModeStr = d['lightMode'] as String?;
     if (lightModeStr == 'manual') lightMode = LightMode.manual;
@@ -185,6 +215,40 @@ class SmartSpaceProvider extends ChangeNotifier {
     }).toList();
   }
 
+  // ── NOVO: dispara notificação de entrada/saída ────────────────────────────
+  void _fireEntryNotification(String enteredUid, Zone zone, {required bool isEntry}) {
+    // Tenta obter o nome do utilizador a partir dos dados locais.
+    // O displayName não está no RTDB por defeito, por isso usamos o UID
+    // truncado como fallback. Se tiveres um cache de nomes, substitui aqui.
+    final name = _userDisplayName(enteredUid);
+    final zoneName = zone.name;
+
+    NotificationService.instance.show(AppNotification(
+      id: '${isEntry ? "entry" : "exit"}_${enteredUid}_${DateTime.now().millisecondsSinceEpoch}',
+      title: isEntry ? 'Entrada na $zoneName' : 'Saída da $zoneName',
+      message: isEntry
+          ? '$name entrou na $zoneName'
+          : '$name saiu da $zoneName',
+      type: isEntry ? AppNotificationType.zoneEntry : AppNotificationType.zoneExit,
+    ));
+  }
+
+  /// Cache simples de nomes: populado sempre que o próprio utilizador se move
+  /// ou quando a app conhece o displayName de outros users.
+  final Map<String, String> _userNames = {};
+
+  /// Regista o nome de um utilizador no cache local
+  void registerUserName(String uid, String displayName) {
+    _userNames[uid] = displayName;
+  }
+
+  String _userDisplayName(String uid) {
+    if (_userNames.containsKey(uid)) return _userNames[uid]!;
+    // Fallback: primeiros 6 caracteres do UID
+    return 'Utilizador ${uid.substring(0, min(6, uid.length))}';
+  }
+  // ── fim NOVO ──────────────────────────────────────────────────────────────
+
   // ══════════════════════════════════════════════════════════════════════════
   // ALGORITMO LDR — só corre quando zona em AUTO
   // ══════════════════════════════════════════════════════════════════════════
@@ -196,7 +260,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     final ldr = z.luminosity ?? 0.0;
     final threshold = z.automations.ldrThreshold;
 
-    // Blend de preferências de todos os presentes
     final blended = _blendPreferences(z.presentUsers, zoneId);
     final intensity = blended.lightIntensity * max(0.0, 1.0 - (ldr / threshold));
 
@@ -252,8 +315,6 @@ class SmartSpaceProvider extends ChangeNotifier {
   // SISTEMA DE POLL — lógica central
   // ══════════════════════════════════════════════════════════════════════════
 
-  // Decide se precisa de poll ou age diretamente
-  // Retorna true se agiu direto, false se abriu poll
   Future<bool> _requestAction({
     required String zoneId,
     required String action,
@@ -266,13 +327,11 @@ class SmartSpaceProvider extends ChangeNotifier {
     final z = zoneById(zoneId);
     if (z == null) return false;
 
-    // Bloquear nova poll se já há uma ativa
     if (z.activePoll != null && !z.activePoll!.isExpired) {
       debugPrint('[SS] Poll já ativa — ignorando nova acção $action');
       return false;
     }
 
-    // ABSOLUTE → age direto sempre
     if (z.absoluteLocked && z.absoluteLockedBy == _uid) {
       await _applyAction(zoneId, action,
           intensity: intensity, r: r, g: g, b: b,
@@ -280,7 +339,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       return true;
     }
 
-    // Sala vazia → age direto
     if (z.presentUsers.isEmpty) {
       await _applyAction(zoneId, action,
           intensity: intensity, r: r, g: g, b: b,
@@ -288,7 +346,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       return true;
     }
 
-    // 1 pessoa na sala e é o próprio → age direto
     if (z.presentUsers.length == 1 && z.presentUsers.contains(_uid)) {
       await _applyAction(zoneId, action,
           intensity: intensity, r: r, g: g, b: b,
@@ -296,7 +353,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       return true;
     }
 
-    // Todos os outros casos → poll
     await _openPoll(
       zoneId: zoneId, action: action,
       intensity: intensity, r: r, g: g, b: b,
@@ -320,7 +376,7 @@ class SmartSpaceProvider extends ChangeNotifier {
       requestedByName: _displayName,
       action: action,
       expiresAt: DateTime.now().add(const Duration(seconds: 30)),
-      votes: {_uid!: true}, // quem pediu vota sim automaticamente
+      votes: {_uid!: true},
       intensity: intensity,
       r: r, g: g, b: b,
       lightState: lightState,
@@ -333,7 +389,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       _pendingCommands.add(() => _db?.openPoll(zoneId, poll));
     }
 
-    // Timer de expiração
     Timer(const Duration(seconds: 31), () => _expirePoll(zoneId));
 
     _log(LogEvent(
@@ -345,7 +400,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Aplica a ação efectivamente
   Future<void> _applyAction(String zoneId, String action, {
     double? intensity, int? r, int? g, int? b,
     bool? lightState, LightMode? targetMode,
@@ -368,7 +422,6 @@ class SmartSpaceProvider extends ChangeNotifier {
 
       case 'setIntensity':
         if (intensity == null) return;
-        // Passa a MANUAL ao alterar intensidade
         _updateZone(zoneId, (z) => z.copyWith(lightIntensity: intensity, lightMode: LightMode.manual));
         if (_isConnected) {
           await _db?.updateZoneLight(zoneId, z.lightOn, intensity, r: z.lightR, g: z.lightG, b: z.lightB);
@@ -382,7 +435,6 @@ class SmartSpaceProvider extends ChangeNotifier {
 
       case 'setColor':
         if (r == null || g == null || b == null) return;
-        // Cor muda para MANUAL
         _updateZone(zoneId, (z) => z.copyWith(lightR: r, lightG: g, lightB: b, lightMode: LightMode.manual));
         if (_isConnected) {
           await _db?.updateZoneLight(zoneId, z.lightOn, z.lightIntensity, r: r, g: g, b: b);
@@ -410,7 +462,6 @@ class SmartSpaceProvider extends ChangeNotifier {
         break;
 
       case 'applyPrefs':
-      // Aplica preferências: intensidade + cor + passa a MANUAL
         if (intensity != null) {
           _updateZone(zoneId, (z) => z.copyWith(lightIntensity: intensity, lightMode: LightMode.manual));
           if (_isConnected) {
@@ -439,30 +490,24 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Aplica resultado negociado — média de TODOS os valores (sim usa pedido, não usa contra-proposta)
   Future<void> _applyNegotiatedResult(String zoneId, ZonePoll poll) async {
     final z = zoneById(zoneId);
     if (z == null) return;
 
     if (poll.action == 'setIntensity') {
-      // Recolhe todos os valores: yes → valor pedido, no → contra-proposta
       final values = <double>[];
       for (final entry in poll.votes.entries) {
         if (entry.value) {
-          // Votou sim → usa o valor pedido
           values.add(poll.intensity ?? z.lightIntensity);
         } else {
-          // Votou não → usa a contra-proposta se existir, senão usa valor atual
           values.add(poll.counterProposals[entry.key] ?? z.lightIntensity);
         }
       }
       if (values.isEmpty) return;
       final avg = values.reduce((a, b) => a + b) / values.length;
-      debugPrint('[POLL] Intensidade negociada: ${values.map((v) => "${(v*100).toInt()}%").join(", ")} → avg=${(avg*100).toInt()}%');
       await _applyAction(zoneId, 'setIntensity', intensity: avg);
 
     } else if (poll.action == 'setColor') {
-      // Recolhe todos os valores RGB
       int sumR = 0, sumG = 0, sumB = 0;
       int count = 0;
       for (final entry in poll.votes.entries) {
@@ -479,15 +524,13 @@ class SmartSpaceProvider extends ChangeNotifier {
         count++;
       }
       if (count == 0) return;
-      final avgR = (sumR / count).round();
-      final avgG = (sumG / count).round();
-      final avgB = (sumB / count).round();
-      debugPrint('[POLL] Cor negociada: R:$avgR G:$avgG B:$avgB');
-      await _applyAction(zoneId, 'setColor', r: avgR, g: avgG, b: avgB);
+      await _applyAction(zoneId, 'setColor',
+          r: (sumR / count).round(),
+          g: (sumG / count).round(),
+          b: (sumB / count).round());
     }
   }
 
-  // Aplica resultado de empate — médias
   Future<void> _applyTieResult(String zoneId, ZonePoll poll) async {
     final z = zoneById(zoneId);
     if (z == null) return;
@@ -495,7 +538,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     switch (poll.action) {
       case 'lightOff':
       case 'lightOn':
-      // Empate → mantém estado actual
         _log(LogEvent(
           id: _uid_(), type: LogEventType.manualCommand, zoneId: zoneId,
           message: 'Empate na votação — estado da luz mantido na ${z.name}',
@@ -505,7 +547,6 @@ class SmartSpaceProvider extends ChangeNotifier {
 
       case 'setIntensity':
         if (poll.intensity == null) return;
-        // Média entre intensidade pedida e actual
         final avgIntensity = (poll.intensity! + z.lightIntensity) / 2;
         await _applyAction(zoneId, 'setIntensity', intensity: avgIntensity);
         _log(LogEvent(
@@ -517,7 +558,6 @@ class SmartSpaceProvider extends ChangeNotifier {
 
       case 'setColor':
         if (poll.r == null || poll.g == null || poll.b == null) return;
-        // Média RGB entre cor pedida e actual
         final avgR = ((poll.r! + z.lightR) / 2).toInt();
         final avgG = ((poll.g! + z.lightG) / 2).toInt();
         final avgB = ((poll.b! + z.lightB) / 2).toInt();
@@ -531,7 +571,6 @@ class SmartSpaceProvider extends ChangeNotifier {
 
       case 'setModeAuto':
       case 'setModeManual':
-      // Empate de modo → mantém modo actual
         _log(LogEvent(
           id: _uid_(), type: LogEventType.manualCommand, zoneId: zoneId,
           message: 'Empate: modo mantido na ${z.name}',
@@ -541,7 +580,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     }
   }
 
-  // ── Votar numa poll ───────────────────────────────────────────────────────
   Future<void> votePoll(String zoneId, bool vote) async {
     if (_uid == null) return;
     final z = zoneById(zoneId);
@@ -549,7 +587,7 @@ class SmartSpaceProvider extends ChangeNotifier {
 
     final poll = z.activePoll!;
     if (poll.isExpired) return;
-    if (poll.votes.containsKey(_uid)) return; // já votou
+    if (poll.votes.containsKey(_uid)) return;
 
     final newVotes = Map<String, bool>.from(poll.votes)..[_uid!] = vote;
     final updatedPoll = ZonePoll(
@@ -563,7 +601,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     if (_isConnected) await _db?.votePoll(zoneId, _uid!, vote);
     else _pendingCommands.add(() => _db?.votePoll(zoneId, _uid!, vote));
 
-    // Verificar resultado
     await _checkPollResult(zoneId, updatedPoll);
     notifyListeners();
   }
@@ -571,7 +608,6 @@ class SmartSpaceProvider extends ChangeNotifier {
   void _markPollResolved(ZonePoll poll) {
     final pollId = '${poll.requestedBy}_${poll.expiresAt.millisecondsSinceEpoch}';
     _resolvedPollIds.add(pollId);
-    // Limpa IDs antigos para não crescer indefinidamente (guarda só os últimos 20)
     if (_resolvedPollIds.length > 20) _resolvedPollIds.clear();
     debugPrint('[POLL] Marcada como resolvida: $pollId');
   }
@@ -580,11 +616,8 @@ class SmartSpaceProvider extends ChangeNotifier {
     final z = zoneById(zoneId);
     if (z == null) return;
 
-    // Total de voters esperados = presentes na sala + o requester (se não estiver na sala)
     final presentCount = z.presentUsers.length;
     final requesterInRoom = z.presentUsers.contains(poll.requestedBy);
-    // Se o requester (admin) não está na sala, ele já votou automaticamente (sim)
-    // O total esperado é: pessoas na sala + (1 se requester fora da sala)
     final totalExpected = requesterInRoom ? presentCount : presentCount + 1;
 
     final yes   = poll.votes.values.where((v) =>  v).length;
@@ -593,12 +626,9 @@ class SmartSpaceProvider extends ChangeNotifier {
 
     debugPrint('[POLL] $zoneId: $yes sim / $no não / $voted votaram / $totalExpected esperados');
 
-    // Ainda não votaram todos — aguarda
     if (voted < totalExpected) return;
 
-    // Todos votaram — determina resultado
     if (yes > no) {
-      // Maioria sim → aplica diretamente
       await _applyAction(zoneId, poll.action,
           intensity: poll.intensity, r: poll.r, g: poll.g, b: poll.b,
           lightState: poll.lightState);
@@ -612,15 +642,12 @@ class SmartSpaceProvider extends ChangeNotifier {
       _updateZone(zoneId, (z) => z.copyWith(clearPoll: true));
 
     } else if (no > yes) {
-      // Maioria não → para intensidade/cor aguarda contra-propostas
       if ((poll.action == 'setIntensity' || poll.action == 'setColor') &&
           poll.counterProposals.length < no &&
           poll.colorCounterProposals.length < no) {
-        // Ainda faltam contra-propostas — a UI vai pedi-las, não fechamos
         debugPrint('[POLL] Aguardando contra-propostas ($no nãos)');
         return;
       }
-      // Tem todas as contra-propostas → calcula resultado negociado
       if (poll.action == 'setIntensity' || poll.action == 'setColor') {
         await _applyNegotiatedResult(zoneId, poll);
         _log(LogEvent(
@@ -629,7 +656,6 @@ class SmartSpaceProvider extends ChangeNotifier {
           userName: 'Sistema', userRole: 'system', uid: _uid ?? '',
         ));
       } else {
-        // Ações binárias (ligar/desligar, mudar modo) rejeitadas → mantém
         _log(LogEvent(
           id: _uid_(), type: LogEventType.manualCommand, zoneId: zoneId,
           message: 'Votação rejeitada ($yes sim / $no não): ${_pollActionLabel(poll.action, intensity: poll.intensity)}',
@@ -641,7 +667,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       _updateZone(zoneId, (z) => z.copyWith(clearPoll: true));
 
     } else {
-      // Empate exato
       await _applyTieResult(zoneId, poll);
       _markPollResolved(poll);
       await _db?.closePoll(zoneId);
@@ -651,7 +676,7 @@ class SmartSpaceProvider extends ChangeNotifier {
 
   void _expirePoll(String zoneId) {
     final z = zoneById(zoneId);
-    if (z == null || z.activePoll == null) return; // já foi resolvida entretanto
+    if (z == null || z.activePoll == null) return;
 
     final poll = z.activePoll!;
     final yes = poll.votes.values.where((v) =>  v).length;
@@ -659,17 +684,13 @@ class SmartSpaceProvider extends ChangeNotifier {
     final total = z.presentUsers.length;
 
     if (yes > no) {
-      // Mais sins → aplica
       _applyAction(zoneId, poll.action,
           intensity: poll.intensity, r: poll.r, g: poll.g, b: poll.b);
     } else if (no > yes && (poll.action == 'setIntensity' || poll.action == 'setColor')) {
-      // Mais nãos em intensidade/cor → negocia com o que existe
       _applyNegotiatedResult(zoneId, poll);
     } else if (yes == no && yes > 0) {
-      // Empate → regra de empate
       _applyTieResult(zoneId, poll);
     }
-    // Se mais nãos em ação binária ou ninguém votou → mantém estado
 
     _markPollResolved(poll);
     _db?.closePoll(zoneId);
@@ -682,19 +703,14 @@ class SmartSpaceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Submete uma contra-proposta de um voter que votou "não"
-  /// Para intensidade: value = nova intensidade preferida
-  /// Para cor: r, g, b = nova cor preferida
   Future<void> submitCounterProposal(String zoneId, {double? intensity, int? r, int? g, int? b}) async {
     if (_uid == null) return;
     final z = zoneById(zoneId);
     if (z == null || z.activePoll == null) return;
     final poll = z.activePoll!;
 
-    // Verifica que este user votou não
     if (poll.votes[_uid] != false) return;
 
-    // Atualiza a poll localmente com a contra-proposta
     ZonePoll updatedPoll;
     if (poll.action == 'setIntensity' && intensity != null) {
       final newProposals = Map<String, double>.from(poll.counterProposals)..[_uid!] = intensity;
@@ -710,7 +726,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     if (_isConnected) await _db?.submitCounterProposal(zoneId, _uid!, intensity: intensity, r: r, g: g, b: b);
     else _pendingCommands.add(() => _db?.submitCounterProposal(zoneId, _uid!, intensity: intensity, r: r, g: g, b: b));
 
-    // Re-verifica se podemos resolver agora
     await _checkPollResult(zoneId, updatedPoll);
     notifyListeners();
   }
@@ -758,7 +773,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     if (z == null) return;
     if (z.isAbsoluteLocked && z.absoluteLockedBy != _uid) return;
 
-    // Em AUTO → guarda nas preferências da sessão, não abre poll (cor em AUTO é pessoal)
     if (z.lightMode == LightMode.auto && _uid != null) {
       final currentPrefs = _preferences[zoneId] ?? UserPreferences(zoneId: zoneId);
       _preferences[zoneId] = currentPrefs.copyWith(lightColor: color);
@@ -768,7 +782,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       return;
     }
 
-    // Em MANUAL → poll
     await _requestAction(
       zoneId: zoneId,
       action: 'setColor',
@@ -780,7 +793,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     final z = zoneById(zoneId);
     if (z == null) return;
     if (z.isAbsoluteLocked && z.absoluteLockedBy != _uid) return;
-    if (z.lightMode == mode) return; // já está no modo pedido
+    if (z.lightMode == mode) return;
 
     await _requestAction(
       zoneId: zoneId,
@@ -788,7 +801,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     );
   }
 
-  // Modo ABSOLUTE — só admin
   Future<void> setAbsoluteMode(String zoneId, bool active) async {
     if (_uid == null || !isAdmin) return;
 
@@ -931,6 +943,11 @@ class SmartSpaceProvider extends ChangeNotifier {
     final prev = _currentZoneId;
     _currentZoneId = zoneId;
 
+    // Regista o próprio nome no cache para outros devices
+    if (_appUser?.displayName != null) {
+      _userNames[_uid!] = _appUser!.displayName;
+    }
+
     if (prev != null) {
       _lastComputedLight.remove(prev);
       final z = zoneById(prev);
@@ -961,7 +978,6 @@ class SmartSpaceProvider extends ChangeNotifier {
           message: '$_displayName entrou na ${zoneById(zoneId)?.name ?? zoneId}',
           userName: _displayName, userRole: _appUser?.role.name ?? 'user', uid: _uid ?? ''));
 
-      // Aplica preferências ao entrar
       _applyPreferencesOnEntry(zoneId);
     }
 
@@ -974,11 +990,8 @@ class SmartSpaceProvider extends ChangeNotifier {
     final prefs = _preferences[zoneId];
     if (prefs == null || !prefs.enabled) return;
 
-    // Com mais pessoas presentes → pede votação para aplicar preferências
-    // (exclui o próprio que acabou de entrar dos "presentes" para o check)
     final othersPresent = z.presentUsers.where((u) => u != _uid).toList();
     if (othersPresent.isNotEmpty) {
-      // Abre poll para aplicar as preferências
       _openPoll(
         zoneId: zoneId,
         action: 'applyPrefs',
@@ -990,7 +1003,6 @@ class SmartSpaceProvider extends ChangeNotifier {
       return;
     }
 
-    // Sozinho → aplica direto
     _applyAction(zoneId, 'setIntensity', intensity: prefs.lightIntensity);
     _applyAction(zoneId, 'setColor',
         r: prefs.lightColor.red, g: prefs.lightColor.green, b: prefs.lightColor.blue);
@@ -1065,6 +1077,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     final prev = _currentZoneId;
     _currentZoneId = null;
     _lastComputedLight.clear();
+    _prevPresentUsers.clear(); // ← NOVO: limpa snapshots ao fazer logout
 
     if (prev != null) {
       if (_isConnected && _db != null) {

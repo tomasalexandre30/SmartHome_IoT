@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../services/smartspace_provider.dart';
 import '../../services/beacon_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/notification_service.dart';   // ← NOVO
 import '../../theme/app_theme.dart';
 import '../../widgets/widgets.dart';
 import '../../models/models.dart';
@@ -12,8 +13,8 @@ class UserSettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<SmartSpaceProvider, BeaconService>(
-      builder: (context, ss, ble, _) {
+    return Consumer3<SmartSpaceProvider, BeaconService, NotificationService>(
+      builder: (context, ss, ble, notif, _) {
         final auth = context.watch<AuthService>();
         final user = auth.appUser;
 
@@ -27,6 +28,21 @@ class UserSettingsScreen extends StatelessWidget {
               // ── Conta ──────────────────────────────────────────────
               _GroupHeader(title: 'Conta'),
               _AccountCard(user: user, auth: auth),
+              const SizedBox(height: 8),
+
+              // ── NOVO: Notificações ─────────────────────────────────
+              _GroupHeader(title: 'Notificações'),
+              _SettingCard(children: [
+                _ToggleRow(
+                  icon: Icons.notifications_rounded,
+                  label: 'Notificações in-app',
+                  subtitle: notif.notificationsEnabled
+                      ? 'Receber alertas de entrada e saída da tua zona'
+                      : 'Notificações desativadas',
+                  value: notif.notificationsEnabled,
+                  onChanged: (v) => notif.setEnabled(v),
+                ),
+              ]),
               const SizedBox(height: 8),
 
               // ── BLE ────────────────────────────────────────────────
@@ -274,7 +290,7 @@ class _AboutCard extends StatelessWidget {
   );
 }
 
-// ── Logout + Delete (reutilizados dos dois ecrãs) ─────────────────────────────
+// ── Logout + Delete ────────────────────────────────────────────────────────────
 
 class _LogoutButton extends StatelessWidget {
   final AuthService auth;

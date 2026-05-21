@@ -7,6 +7,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/widgets.dart';
 import '../../models/models.dart';
 import '../../services/database_service.dart';
+import '../../widgets/zone_map_card.dart';   // ← NOVO
 
 // ── Helper global seguro para labels de UID ───────────────────────────────────
 String _safeUidLabel(String uid) =>
@@ -114,7 +115,19 @@ class AdminDashboardScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   _Esp32StatusRow(zones: ss.zones),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
+
+                  // ── NOVO: Mapa Interativo ─────────────────────────
+                  const SectionHeader(title: 'Mapa Interativo'),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: SS.card(),
+                    child: const ZoneMapCard(),
+                  ),
+                  const SizedBox(height: 20),
+                  // ── fim NOVO ──────────────────────────────────────
+
                   _ZonesQuickRow(zones: ss.zones, ble: ble),
                   const SizedBox(height: 20),
                   const SectionHeader(title: 'Utilizadores Online'),
@@ -181,7 +194,8 @@ class _Esp32StatusRow extends StatelessWidget {
                       ),
                     ),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                  padding:
+                  const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
                   child: Column(
                     children: [
                       Container(
@@ -193,11 +207,13 @@ class _Esp32StatusRow extends StatelessWidget {
                               : AppTheme.error.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: z.esp32Online
-                              ? [BoxShadow(
-                            color: AppTheme.success.withOpacity(0.25),
-                            blurRadius: 8,
-                            spreadRadius: 1,
-                          )]
+                              ? [
+                            BoxShadow(
+                              color: AppTheme.success.withOpacity(0.25),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            )
+                          ]
                               : null,
                         ),
                         child: Icon(
@@ -221,18 +237,22 @@ class _Esp32StatusRow extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Container(
-                            width: 6, height: 6,
+                            width: 6,
+                            height: 6,
                             decoration: BoxDecoration(
                               color: z.esp32Online
                                   ? AppTheme.success
                                   : AppTheme.error,
                               shape: BoxShape.circle,
                               boxShadow: z.esp32Online
-                                  ? [BoxShadow(
-                                color: AppTheme.success.withOpacity(0.5),
-                                blurRadius: 4,
-                                spreadRadius: 1,
-                              )]
+                                  ? [
+                                BoxShadow(
+                                  color:
+                                  AppTheme.success.withOpacity(0.5),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                )
+                              ]
                                   : null,
                             ),
                           ),
@@ -291,7 +311,8 @@ class _WelcomeBanner extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 48, height: 48,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
                   color: AppTheme.accent.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(14),
@@ -385,16 +406,31 @@ class _WelcomeBanner extends StatelessWidget {
 
   String _weekday(int d) {
     const days = [
-      'Segunda', 'Terça', 'Quarta', 'Quinta',
-      'Sexta', 'Sábado', 'Domingo'
+      'Segunda',
+      'Terça',
+      'Quarta',
+      'Quinta',
+      'Sexta',
+      'Sábado',
+      'Domingo'
     ];
     return days[d - 1];
   }
 
   String _month(int m) {
     const months = [
-      'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
+      'Jan',
+      'Fev',
+      'Mar',
+      'Abr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Set',
+      'Out',
+      'Nov',
+      'Dez'
     ];
     return months[m - 1];
   }
@@ -418,15 +454,18 @@ class _StatusDot extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       Container(
-        width: 7, height: 7,
+        width: 7,
+        height: 7,
         decoration: BoxDecoration(
           color: active ? AppTheme.success : AppTheme.textMuted,
           shape: BoxShape.circle,
           boxShadow: active
-              ? [BoxShadow(
-              color: AppTheme.success.withOpacity(0.4),
-              blurRadius: 4,
-              spreadRadius: 1)]
+              ? [
+            BoxShadow(
+                color: AppTheme.success.withOpacity(0.4),
+                blurRadius: 4,
+                spreadRadius: 1)
+          ]
               : null,
         ),
       ),
@@ -609,7 +648,8 @@ class _ZoneCompactRow extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 36, height: 36,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   color: z.color.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
@@ -718,16 +758,19 @@ class _Esp32Dot extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 5, height: 5,
+            width: 5,
+            height: 5,
             decoration: BoxDecoration(
               color: online ? AppTheme.success : AppTheme.error,
               shape: BoxShape.circle,
               boxShadow: online
-                  ? [BoxShadow(
-                color: AppTheme.success.withOpacity(0.5),
-                blurRadius: 3,
-                spreadRadius: 0.5,
-              )]
+                  ? [
+                BoxShadow(
+                  color: AppTheme.success.withOpacity(0.5),
+                  blurRadius: 3,
+                  spreadRadius: 0.5,
+                )
+              ]
                   : null,
             ),
           ),
@@ -769,8 +812,8 @@ class _OnlineUsersCard extends StatelessWidget {
                     color: AppTheme.textMuted, size: 20),
                 SizedBox(width: 12),
                 Text('Nenhum utilizador online',
-                    style: TextStyle(
-                        color: AppTheme.textMuted, fontSize: 13)),
+                    style:
+                    TextStyle(color: AppTheme.textMuted, fontSize: 13)),
               ],
             ),
           );
@@ -785,7 +828,8 @@ class _OnlineUsersCard extends StatelessWidget {
                 child: Row(
                   children: [
                     Container(
-                      width: 36, height: 36,
+                      width: 36,
+                      height: 36,
                       decoration: BoxDecoration(
                         color: AppTheme.success.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(10),
@@ -813,14 +857,17 @@ class _OnlineUsersCard extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            width: 6, height: 6,
+                            width: 6,
+                            height: 6,
                             decoration: BoxDecoration(
                               color: AppTheme.success,
                               shape: BoxShape.circle,
-                              boxShadow: [BoxShadow(
-                                  color: AppTheme.success.withOpacity(0.5),
-                                  blurRadius: 4,
-                                  spreadRadius: 1)],
+                              boxShadow: [
+                                BoxShadow(
+                                    color: AppTheme.success.withOpacity(0.5),
+                                    blurRadius: 4,
+                                    spreadRadius: 1)
+                              ],
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -839,10 +886,11 @@ class _OnlineUsersCard extends StatelessWidget {
               const Divider(height: 1),
               ...users.map((u) {
                 final zone = u.currentZoneId != null
-                    ? zones.where((z) => z.id == u.currentZoneId).firstOrNull
+                    ? zones
+                    .where((z) => z.id == u.currentZoneId)
+                    .firstOrNull
                     : null;
 
-                // ✅ Seguro: nunca faz substring em string potencialmente curta
                 final displayName = u.displayName.isNotEmpty
                     ? u.displayName
                     : _safeUidLabel(u.uid);
@@ -866,10 +914,11 @@ class _OnlineUsersCard extends StatelessWidget {
                   child: Row(
                     children: [
                       Container(
-                        width: 38, height: 38,
+                        width: 38,
+                        height: 38,
                         decoration: BoxDecoration(
-                          color: (zone?.color ?? AppTheme.accent)
-                              .withOpacity(0.12),
+                          color:
+                          (zone?.color ?? AppTheme.accent).withOpacity(0.12),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                               color: (zone?.color ?? AppTheme.accent)
@@ -939,8 +988,8 @@ class _OnlineUsersCard extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: zone.color.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: zone.color.withOpacity(0.3)),
+                            border:
+                            Border.all(color: zone.color.withOpacity(0.3)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
