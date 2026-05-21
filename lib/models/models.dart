@@ -47,18 +47,16 @@ class LightSettings {
 class ZonePoll {
   final String requestedBy;
   final String requestedByName;
-  final String action;      // 'lightOff'|'lightOn'|'setIntensity'|'setColor'|'setModeAuto'|'setModeManual'
+  final String action;
   final DateTime expiresAt;
-  final Map<String, bool> votes; // uid → true(sim)/false(não)
+  final Map<String, bool> votes;
 
-  // Payload (dependendo da ação)
-  final double? intensity;  // para setIntensity
-  final int? r, g, b;       // para setColor
-  final bool? lightState;   // para lightOn/lightOff
+  final double? intensity;
+  final int? r, g, b;
+  final bool? lightState;
 
-  // Contra-propostas de quem votou "não" (para negociação)
-  final Map<String, double> counterProposals;        // uid → intensidade preferida
-  final Map<String, List<int>> colorCounterProposals; // uid → [r,g,b] preferido
+  final Map<String, double> counterProposals;
+  final Map<String, List<int>> colorCounterProposals;
 
   const ZonePoll({
     required this.requestedBy,
@@ -341,11 +339,10 @@ class Zone {
   DateTime lastUpdated;
   bool esp32Online;
 
-  // ── Controlo de luz — GLOBAL ───────────────────────────────────────────────
-  LightMode lightMode;           // modo global da zona
-  bool absoluteLocked;           // admin ativou modo absoluto
-  String? absoluteLockedBy;      // uid do admin que ativou
-  ZonePoll? activePoll;          // poll ativa (null se não há)
+  LightMode lightMode;
+  bool absoluteLocked;
+  String? absoluteLockedBy;
+  ZonePoll? activePoll;
 
   Zone({
     required this.id, required this.name, required this.beaconUuid,
@@ -391,6 +388,10 @@ class Zone {
     }
   }
 
+  // ── BUG FIX: copyWith usa _Sentinel para distinguir null explícito de "não passado"
+  // O padrão anterior (activePoll ?? this.activePoll) tornava impossível limpar
+  // a poll passando null — usava sempre o valor antigo.
+  // Agora: passar activePoll: null limpa explicitamente. clearPoll continua a funcionar.
   Zone copyWith({
     ZoneStatus? status, int? occupantCount, List<String>? presentUsers,
     double? luminosity, double? temperature, double? humidity, bool? motionDetected,
@@ -399,8 +400,10 @@ class Zone {
     bool? buzzerOn, ZoneAutomations? automations,
     double? energyUsageWh, bool? esp32Online,
     LightMode? lightMode, bool? absoluteLocked,
-    String? absoluteLockedBy, ZonePoll? activePoll,
-    bool clearPoll = false, bool clearAbsolute = false,
+    String? absoluteLockedBy,
+    Object? activePoll = _sentinel,   // <-- usa sentinel, não ZonePoll?
+    bool clearPoll = false,
+    bool clearAbsolute = false,
   }) => Zone(
     id: id, name: name, beaconUuid: beaconUuid, color: color, icon: icon,
     status: status ?? this.status,
@@ -424,9 +427,19 @@ class Zone {
     lightMode: lightMode ?? this.lightMode,
     absoluteLocked: absoluteLocked ?? this.absoluteLocked,
     absoluteLockedBy: clearAbsolute ? null : (absoluteLockedBy ?? this.absoluteLockedBy),
-    activePoll: clearPoll ? null : (activePoll ?? this.activePoll),
+    // clearPoll=true → null
+    // activePoll passado explicitamente (incluindo null) → usa esse valor
+    // nada passado (sentinel) → mantém o atual
+    activePoll: clearPoll
+        ? null
+        : (activePoll == _sentinel
+        ? this.activePoll
+        : activePoll as ZonePoll?),
   );
 }
+
+// Sentinel para distinguir "não passou activePoll" de "passou null explicitamente"
+const Object _sentinel = Object();
 
 class LogEvent {
   final String id, zoneId, message, userName, userRole, uid;

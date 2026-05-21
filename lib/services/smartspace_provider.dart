@@ -104,9 +104,50 @@ class SmartSpaceProvider extends ChangeNotifier {
       try {
         poll = ZonePoll.fromJson(
             Map<String, dynamic>.from(d['activePoll'] as Map));
+
         // Ignorar polls expiradas ou já resolvidas localmente
         final pollId = '${poll.requestedBy}_${poll.expiresAt.millisecondsSinceEpoch}';
-        if (poll.isExpired || _resolvedPollIds.contains(pollId)) poll = null;
+        if (poll.isExpired || _resolvedPollIds.contains(pollId)) {
+          poll = null;
+        } else {
+          // ── BUG FIX: Opção A ──────────────────────────────────────────────
+          // O device que resolveu a poll (ex: o user) já apagou o nó do Firebase,
+          // mas este device (ex: o admin) pode receber um update intermédio com
+          // todos os votos preenchidos mas antes do nó ser apagado.
+          // Verificamos aqui se todos já votaram — se sim, marcamos como resolvida
+          // localmente e descartamos a poll, sem esperar pelo próximo stream event.
+          final presentUsers = d['presentUsers'] != null
+              ? List<String>.from(
+              (d['presentUsers'] as Map).keys.map((k) => k.toString()))
+              : <String>[];
+          final presentCount = presentUsers.length;
+          final requesterInRoom = presentUsers.contains(poll.requestedBy);
+          final totalExpected =
+          requesterInRoom ? presentCount : presentCount + 1;
+          final voted = poll.votes.length;
+
+          if (totalExpected > 0 && voted >= totalExpected) {
+            // Todos já votaram — esta poll já foi ou está prestes a ser resolvida
+            // noutro device. Marcamos como resolvida aqui para não bloquear o admin.
+            debugPrint(
+                '[POLL][FIX] Todos votaram ($voted/$totalExpected) — descartando poll no _applyZoneUpdate');
+            _markPollResolved(poll);
+
+            // CRÍTICO: capturar poll numa variável local ANTES de a anular.
+            // O closure do addPostFrameCallback captura a referência à variável
+            // poll — se usarmos poll! depois de poll=null, o Dart lança null check
+            // failed em runtime e _checkPollResult nunca é chamado no admin.
+            final pollSnapshot = poll;
+            poll = null; // anular ANTES do callback — banner desaparece imediatamente
+
+            // Se este device é quem pediu a poll (admin remoto), resolve localmente
+            // para aplicar o resultado (ex: mudar modo AUTO).
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _checkPollResult(update.zoneId, pollSnapshot);
+            });
+          }
+          // ── fim BUG FIX ───────────────────────────────────────────────────
+        }
       } catch (_) {}
     }
 
