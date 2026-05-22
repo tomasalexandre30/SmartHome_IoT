@@ -43,7 +43,6 @@ class LightSettings {
 }
 
 // ── ZonePoll — votação para qualquer ação ─────────────────────────────────────
-// Guardado em: smartspace/zones/{zoneId}/activePoll/
 class ZonePoll {
   final String requestedBy;
   final String requestedByName;
@@ -303,6 +302,33 @@ class ZoneAutomations {
   );
 }
 
+// ── ActuatorConfig — potências nominais dos atuadores (configurável pelo admin) ──
+class ActuatorConfig {
+  final double ledRgbWatts;
+  final double buzzerWatts;
+
+  const ActuatorConfig({
+    this.ledRgbWatts = 5.0,
+    this.buzzerWatts = 0.5,
+  });
+
+  ActuatorConfig copyWith({double? ledRgbWatts, double? buzzerWatts}) =>
+      ActuatorConfig(
+        ledRgbWatts: ledRgbWatts ?? this.ledRgbWatts,
+        buzzerWatts: buzzerWatts ?? this.buzzerWatts,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'ledRgbWatts': ledRgbWatts,
+    'buzzerWatts': buzzerWatts,
+  };
+
+  factory ActuatorConfig.fromJson(Map<String, dynamic> j) => ActuatorConfig(
+    ledRgbWatts: (j['ledRgbWatts'] as num?)?.toDouble() ?? 5.0,
+    buzzerWatts: (j['buzzerWatts'] as num?)?.toDouble() ?? 0.5,
+  );
+}
+
 class AutomationRule {
   final String id, zoneId, label, sensorKey, operator, action;
   final double threshold;
@@ -335,7 +361,13 @@ class Zone {
 
   List<AutomationRule> rules;
   ZoneAutomations automations;
-  double energyUsageWh;
+
+  // ── Energia ──────────────────────────────────────────────────────────────────
+  double energyUsageWh;      // acumulador publicado pelo ESP32
+  double energyLimitWh;      // limite configurado pelo admin (0 = sem limite)
+  bool energyAlertSent;      // flag para evitar notificações repetidas
+  ActuatorConfig actuatorConfig; // potências nominais dos atuadores
+
   DateTime lastUpdated;
   bool esp32Online;
 
@@ -356,7 +388,10 @@ class Zone {
     this.buzzerOn = false,
     List<AutomationRule>? rules,
     ZoneAutomations? automations,
-    this.energyUsageWh = 0,
+    this.energyUsageWh = 0.0,
+    this.energyLimitWh = 0.0,
+    this.energyAlertSent = false,
+    ActuatorConfig? actuatorConfig,
     DateTime? lastUpdated,
     this.esp32Online = false,
     this.lightMode = LightMode.auto,
@@ -366,11 +401,16 @@ class Zone {
   })  : presentUsers = presentUsers ?? [],
         rules = rules ?? [],
         automations = automations ?? const ZoneAutomations(),
+        actuatorConfig = actuatorConfig ?? const ActuatorConfig(),
         lastUpdated = lastUpdated ?? DateTime.now();
 
   bool get isOccupied => status == ZoneStatus.occupied;
   bool get isAbsoluteLocked => absoluteLocked;
   Color get lightColor => Color.fromRGBO(lightR, lightG, lightB, 1.0);
+
+  /// Percentagem de consumo em relação ao limite (0.0–1.0+). Null se sem limite.
+  double? get energyUsageRatio =>
+      energyLimitWh > 0 ? (energyUsageWh / energyLimitWh).clamp(0.0, 9.9) : null;
 
   String get statusLabel {
     switch (status) {
@@ -388,20 +428,21 @@ class Zone {
     }
   }
 
-  // ── BUG FIX: copyWith usa _Sentinel para distinguir null explícito de "não passado"
-  // O padrão anterior (activePoll ?? this.activePoll) tornava impossível limpar
-  // a poll passando null — usava sempre o valor antigo.
-  // Agora: passar activePoll: null limpa explicitamente. clearPoll continua a funcionar.
+  // ── copyWith usa _Sentinel para distinguir null explícito de "não passado" ──
   Zone copyWith({
     ZoneStatus? status, int? occupantCount, List<String>? presentUsers,
     double? luminosity, double? temperature, double? humidity, bool? motionDetected,
     bool? lightOn, double? lightIntensity,
     int? lightR, int? lightG, int? lightB,
     bool? buzzerOn, ZoneAutomations? automations,
-    double? energyUsageWh, bool? esp32Online,
+    double? energyUsageWh,
+    double? energyLimitWh,
+    bool? energyAlertSent,
+    ActuatorConfig? actuatorConfig,
+    bool? esp32Online,
     LightMode? lightMode, bool? absoluteLocked,
     String? absoluteLockedBy,
-    Object? activePoll = _sentinel,   // <-- usa sentinel, não ZonePoll?
+    Object? activePoll = _sentinel,
     bool clearPoll = false,
     bool clearAbsolute = false,
   }) => Zone(
@@ -422,14 +463,14 @@ class Zone {
     rules: rules,
     automations: automations ?? this.automations,
     energyUsageWh: energyUsageWh ?? this.energyUsageWh,
+    energyLimitWh: energyLimitWh ?? this.energyLimitWh,
+    energyAlertSent: energyAlertSent ?? this.energyAlertSent,
+    actuatorConfig: actuatorConfig ?? this.actuatorConfig,
     lastUpdated: DateTime.now(),
     esp32Online: esp32Online ?? this.esp32Online,
     lightMode: lightMode ?? this.lightMode,
     absoluteLocked: absoluteLocked ?? this.absoluteLocked,
     absoluteLockedBy: clearAbsolute ? null : (absoluteLockedBy ?? this.absoluteLockedBy),
-    // clearPoll=true → null
-    // activePoll passado explicitamente (incluindo null) → usa esse valor
-    // nada passado (sentinel) → mantém o atual
     activePoll: clearPoll
         ? null
         : (activePoll == _sentinel

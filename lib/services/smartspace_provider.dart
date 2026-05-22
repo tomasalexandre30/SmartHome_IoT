@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import 'database_service.dart';
 import 'auth_service.dart';
-import 'notification_service.dart';  // ← NOVO
+import 'notification_service.dart';
 
 class SmartSpaceProvider extends ChangeNotifier {
   List<Zone> _zones = DefaultData.zones();
@@ -37,12 +37,14 @@ class SmartSpaceProvider extends ChangeNotifier {
   // ── Último LightSettings calculado ────────────────────────────────────────
   final Map<String, LightSettings> _lastComputedLight = {};
 
-  // ── IDs de polls já resolvidas — evita re-processar se Firebase atrasa ────
+  // ── IDs de polls já resolvidas ────────────────────────────────────────────
   final Set<String> _resolvedPollIds = {};
 
-  // ── NOVO: snapshot anterior de presentUsers por zona ─────────────────────
-  // Usado para detetar quem entrou/saiu entre dois updates do Firebase
+  // ── Snapshot anterior de presentUsers por zona (notificações) ─────────────
   final Map<String, Set<String>> _prevPresentUsers = {};
+
+  // ── Threshold de alerta de energia (90% do limite) ────────────────────────
+  static const double _energyAlertRatio = 0.90;
 
   DatabaseService? _db;
   String? _uid;
@@ -104,6 +106,14 @@ class SmartSpaceProvider extends ChangeNotifier {
       } catch (_) {}
     }
 
+    ActuatorConfig? actuatorConfig;
+    if (d['actuatorConfig'] != null) {
+      try {
+        actuatorConfig = ActuatorConfig.fromJson(
+            Map<String, dynamic>.from(d['actuatorConfig'] as Map));
+      } catch (_) {}
+    }
+
     ZonePoll? poll;
     if (d['activePoll'] != null) {
       try {
@@ -138,17 +148,14 @@ class SmartSpaceProvider extends ChangeNotifier {
       } catch (_) {}
     }
 
-    // ── NOVO: detetar entradas/saídas para notificações ───────────────────
+    // ── Detetar entradas/saídas para notificações ─────────────────────────
     final newPresentSet = d['presentUsers'] != null
         ? Set<String>.from(
         (d['presentUsers'] as Map).keys.map((k) => k.toString()))
         : <String>{};
 
-    final prevSet = _prevPresentUsers[update.zoneId] ?? {};
-
-    // Só processa se já tínhamos um snapshot anterior (evita notificações
-    // espúrias no arranque quando ainda não há dados locais)
     if (_prevPresentUsers.containsKey(update.zoneId)) {
+      final prevSet = _prevPresentUsers[update.zoneId]!;
       final zone = _zones.firstWhere(
             (z) => z.id == update.zoneId,
         orElse: () => _zones.first,
@@ -158,14 +165,9 @@ class SmartSpaceProvider extends ChangeNotifier {
       final exited  = prevSet.difference(newPresentSet);
 
       for (final enteredUid in entered) {
-        // Não notifica o próprio utilizador sobre si mesmo
         if (enteredUid == _uid) continue;
-
-        // Admin recebe notificações de todas as zonas.
-        // User só recebe se está na mesma zona.
         final shouldNotify = isAdmin || _currentZoneId == update.zoneId;
         if (!shouldNotify) continue;
-
         _fireEntryNotification(enteredUid, zone, isEntry: true);
       }
 
@@ -173,14 +175,11 @@ class SmartSpaceProvider extends ChangeNotifier {
         if (exitedUid == _uid) continue;
         final shouldNotify = isAdmin || _currentZoneId == update.zoneId;
         if (!shouldNotify) continue;
-
         _fireEntryNotification(exitedUid, zone, isEntry: false);
       }
     }
 
-    // Guarda o snapshot atual para comparação no próximo update
     _prevPresentUsers[update.zoneId] = Set<String>.from(newPresentSet);
-    // ── fim NOVO ──────────────────────────────────────────────────────────
 
     LightMode lightMode = LightMode.auto;
     final lightModeStr = d['lightMode'] as String?;
@@ -207,19 +206,24 @@ class SmartSpaceProvider extends ChangeNotifier {
             : [],
         esp32Online: d['esp32Online'] as bool? ?? false,
         automations: automations,
+        actuatorConfig: actuatorConfig,
+        energyUsageWh: (d['energyUsageWh'] as num?)?.toDouble() ?? 0.0,
+        energyLimitWh: (d['energyLimitWh'] as num?)?.toDouble() ?? 0.0,
+        energyAlertSent: d['energyAlertSent'] as bool? ?? false,
         lightMode: lightMode,
         absoluteLocked: d['absoluteLocked'] as bool? ?? false,
         absoluteLockedBy: d['absoluteLockedBy'] as String?,
         activePoll: poll,
       );
     }).toList();
+
+    // ── Verificar alertas de energia após atualizar o estado ──────────────
+    final updatedZone = zoneById(update.zoneId);
+    if (updatedZone != null) _checkEnergyAlert(updatedZone);
   }
 
-  // ── NOVO: dispara notificação de entrada/saída ────────────────────────────
+  // ── Notificações de entrada/saída ─────────────────────────────────────────
   void _fireEntryNotification(String enteredUid, Zone zone, {required bool isEntry}) {
-    // Tenta obter o nome do utilizador a partir dos dados locais.
-    // O displayName não está no RTDB por defeito, por isso usamos o UID
-    // truncado como fallback. Se tiveres um cache de nomes, substitui aqui.
     final name = _userDisplayName(enteredUid);
     final zoneName = zone.name;
 
@@ -233,21 +237,139 @@ class SmartSpaceProvider extends ChangeNotifier {
     ));
   }
 
-  /// Cache simples de nomes: populado sempre que o próprio utilizador se move
-  /// ou quando a app conhece o displayName de outros users.
   final Map<String, String> _userNames = {};
 
-  /// Regista o nome de um utilizador no cache local
   void registerUserName(String uid, String displayName) {
     _userNames[uid] = displayName;
   }
 
   String _userDisplayName(String uid) {
     if (_userNames.containsKey(uid)) return _userNames[uid]!;
-    // Fallback: primeiros 6 caracteres do UID
     return 'Utilizador ${uid.substring(0, min(6, uid.length))}';
   }
-  // ── fim NOVO ──────────────────────────────────────────────────────────────
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ALERTAS DE ENERGIA
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Verifica se a zona ultrapassou (ou está perto de) o limite de energia
+  /// e dispara notificação + log se necessário.
+  /// Usa o flag [energyAlertSent] no Firebase para não repetir alertas.
+  void _checkEnergyAlert(Zone zone) {
+    // Sem limite configurado → ignorar
+    if (zone.energyLimitWh <= 0) return;
+    // Alerta já foi enviado → não repetir
+    if (zone.energyAlertSent) return;
+
+    final ratio = zone.energyUsageWh / zone.energyLimitWh;
+
+    if (ratio >= 1.0) {
+      // ── Limite ULTRAPASSADO ────────────────────────────────────────────────
+      NotificationService.instance.show(AppNotification(
+        id: 'energy_exceeded_${zone.id}_${DateTime.now().millisecondsSinceEpoch}',
+        title: '⚡ Limite ultrapassado — ${zone.name}',
+        message:
+        'Consumo de ${zone.energyUsageWh.toStringAsFixed(1)} Wh excedeu '
+            'o limite de ${zone.energyLimitWh.toStringAsFixed(0)} Wh',
+        type: AppNotificationType.alert,
+      ));
+      _log(LogEvent(
+        id: _uid_(), type: LogEventType.alert, zoneId: zone.id,
+        message: 'ALERTA: limite de energia ultrapassado na ${zone.name} '
+            '(${zone.energyUsageWh.toStringAsFixed(1)} Wh '
+            '> ${zone.energyLimitWh.toStringAsFixed(0)} Wh)',
+        userName: 'Sistema', userRole: 'system', uid: _uid ?? '',
+      ));
+      _db?.markEnergyAlertSent(zone.id);
+
+    } else if (ratio >= _energyAlertRatio) {
+      // ── Aviso a 90% ───────────────────────────────────────────────────────
+      final pct = (ratio * 100).toInt();
+      NotificationService.instance.show(AppNotification(
+        id: 'energy_warn_${zone.id}_${DateTime.now().millisecondsSinceEpoch}',
+        title: 'Aviso de energia — ${zone.name}',
+        message:
+        'Consumo em $pct% do limite '
+            '(${zone.energyUsageWh.toStringAsFixed(1)} / '
+            '${zone.energyLimitWh.toStringAsFixed(0)} Wh)',
+        type: AppNotificationType.alert,
+      ));
+      _log(LogEvent(
+        id: _uid_(), type: LogEventType.alert, zoneId: zone.id,
+        message: 'Aviso: consumo na ${zone.name} em $pct% do limite configurado '
+            '(${zone.energyUsageWh.toStringAsFixed(1)} Wh)',
+        userName: 'Sistema', userRole: 'system', uid: _uid ?? '',
+      ));
+      _db?.markEnergyAlertSent(zone.id);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // API PÚBLICA — Energia
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Define o limite de energia para uma zona (apenas admin).
+  /// Passa 0.0 para remover o limite.
+  Future<void> setEnergyLimit(String zoneId, double limitWh) async {
+    if (!isAdmin) return;
+    _updateZone(zoneId, (z) => z.copyWith(
+      energyLimitWh: limitWh,
+      energyAlertSent: false,
+    ));
+    if (_isConnected) {
+      await _db?.setEnergyLimit(zoneId, limitWh);
+    } else {
+      _pendingCommands.add(() => _db?.setEnergyLimit(zoneId, limitWh));
+    }
+    _log(LogEvent(
+      id: _uid_(), type: LogEventType.manualCommand, zoneId: zoneId,
+      message: '$_displayName definiu limite de energia em '
+          '${zoneById(zoneId)?.name ?? zoneId}: '
+          '${limitWh > 0 ? "${limitWh.toStringAsFixed(0)} Wh" : "sem limite"}',
+      userName: _displayName, userRole: 'admin', uid: _uid ?? '',
+    ));
+    notifyListeners();
+  }
+
+  /// Atualiza as potências nominais dos atuadores (apenas admin).
+  Future<void> setActuatorConfig(String zoneId, ActuatorConfig config) async {
+    if (!isAdmin) return;
+    _updateZone(zoneId, (z) => z.copyWith(actuatorConfig: config));
+    if (_isConnected) {
+      await _db?.setActuatorConfig(zoneId, config);
+    } else {
+      _pendingCommands.add(() => _db?.setActuatorConfig(zoneId, config));
+    }
+    _log(LogEvent(
+      id: _uid_(), type: LogEventType.manualCommand, zoneId: zoneId,
+      message: '$_displayName atualizou potências nominais em '
+          '${zoneById(zoneId)?.name ?? zoneId}: '
+          'LED ${config.ledRgbWatts}W, Buzzer ${config.buzzerWatts}W',
+      userName: _displayName, userRole: 'admin', uid: _uid ?? '',
+    ));
+    notifyListeners();
+  }
+
+  /// Faz reset do acumulador de energia a zero (apenas admin).
+  Future<void> resetEnergyUsage(String zoneId) async {
+    if (!isAdmin) return;
+    _updateZone(zoneId, (z) => z.copyWith(
+      energyUsageWh: 0.0,
+      energyAlertSent: false,
+    ));
+    if (_isConnected) {
+      await _db?.resetEnergyUsage(zoneId);
+    } else {
+      _pendingCommands.add(() => _db?.resetEnergyUsage(zoneId));
+    }
+    _log(LogEvent(
+      id: _uid_(), type: LogEventType.manualCommand, zoneId: zoneId,
+      message: '$_displayName fez reset do consumo energético na '
+          '${zoneById(zoneId)?.name ?? zoneId}',
+      userName: _displayName, userRole: 'admin', uid: _uid ?? '',
+    ));
+    notifyListeners();
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ALGORITMO LDR — só corre quando zona em AUTO
@@ -312,7 +434,7 @@ class SmartSpaceProvider extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SISTEMA DE POLL — lógica central
+  // SISTEMA DE POLL
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<bool> _requestAction({
@@ -943,7 +1065,6 @@ class SmartSpaceProvider extends ChangeNotifier {
     final prev = _currentZoneId;
     _currentZoneId = zoneId;
 
-    // Regista o próprio nome no cache para outros devices
     if (_appUser?.displayName != null) {
       _userNames[_uid!] = _appUser!.displayName;
     }
@@ -1077,7 +1198,7 @@ class SmartSpaceProvider extends ChangeNotifier {
     final prev = _currentZoneId;
     _currentZoneId = null;
     _lastComputedLight.clear();
-    _prevPresentUsers.clear(); // ← NOVO: limpa snapshots ao fazer logout
+    _prevPresentUsers.clear();
 
     if (prev != null) {
       if (_isConnected && _db != null) {

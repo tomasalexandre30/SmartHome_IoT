@@ -64,6 +64,9 @@ class DatabaseService extends ChangeNotifier {
     'humidity': zone.humidity,
     'motionDetected': zone.motionDetected,
     'energyUsageWh': zone.energyUsageWh,
+    'energyLimitWh': zone.energyLimitWh,
+    'energyAlertSent': zone.energyAlertSent,
+    'actuatorConfig': zone.actuatorConfig.toJson(),
     'lastUpdated': rtdb.ServerValue.timestamp,
     'esp32Online': false,
     'esp32LastSeen': 0,
@@ -102,11 +105,21 @@ class DatabaseService extends ChangeNotifier {
           }
         }
 
+        // Garantir que actuatorConfig é um Map<String, dynamic> se existir
+        if (zoneData['actuatorConfig'] != null) {
+          try {
+            zoneData['actuatorConfig'] = Map<String, dynamic>.from(
+              zoneData['actuatorConfig'] as Map,
+            );
+          } catch (_) {
+            zoneData['actuatorConfig'] = null;
+          }
+        }
+
         // Garantir que activePoll é um Map<String, dynamic> se existir
         if (zoneData['activePoll'] != null) {
           try {
             final pollMap = Map<String, dynamic>.from(zoneData['activePoll'] as Map);
-            // Converter votes para Map<String, bool>
             if (pollMap['votes'] != null) {
               pollMap['votes'] = Map<String, bool>.from(
                   (pollMap['votes'] as Map).map((k, v) => MapEntry(k.toString(), v as bool)));
@@ -215,6 +228,57 @@ class DatabaseService extends ChangeNotifier {
       await _zoneRef(zoneId).child('activePoll').remove();
     } catch (e) {
       debugPrint('[DB] Erro ao fechar poll: $e');
+    }
+  }
+
+  // ── Energia ────────────────────────────────────────────────────────────────
+
+  /// Define o limite de consumo energético (Wh) para uma zona.
+  /// Passa 0.0 para remover o limite.
+  /// Faz reset automático do flag de alerta ao mudar o limite.
+  Future<void> setEnergyLimit(String zoneId, double limitWh) async {
+    try {
+      await _zoneRef(zoneId).update({
+        'energyLimitWh': limitWh,
+        'energyAlertSent': false,
+      });
+    } catch (e) {
+      debugPrint('[DB] Erro ao definir limite de energia: $e');
+    }
+  }
+
+  /// Atualiza as potências nominais dos atuadores (LED RGB e Buzzer) em Watts.
+  /// Usado pelo admin para calibrar a estimativa de consumo.
+  Future<void> setActuatorConfig(String zoneId, ActuatorConfig config) async {
+    try {
+      await _zoneRef(zoneId)
+          .child('actuatorConfig')
+          .update(config.toJson());
+    } catch (e) {
+      debugPrint('[DB] Erro ao atualizar config de atuadores: $e');
+    }
+  }
+
+  /// Reset do acumulador de energia a zero (ex: início de novo período).
+  /// Também faz reset do flag de alerta.
+  Future<void> resetEnergyUsage(String zoneId) async {
+    try {
+      await _zoneRef(zoneId).update({
+        'energyUsageWh': 0.0,
+        'energyAlertSent': false,
+      });
+    } catch (e) {
+      debugPrint('[DB] Erro ao fazer reset de energia: $e');
+    }
+  }
+
+  /// Marca o alerta de energia como enviado para evitar notificações repetidas.
+  /// Chamado pelo SmartSpaceProvider após disparar a notificação.
+  Future<void> markEnergyAlertSent(String zoneId) async {
+    try {
+      await _zoneRef(zoneId).update({'energyAlertSent': true});
+    } catch (e) {
+      debugPrint('[DB] Erro ao marcar alerta de energia: $e');
     }
   }
 
